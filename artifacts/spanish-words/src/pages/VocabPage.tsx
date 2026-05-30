@@ -150,7 +150,7 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
   const onClick = () => { if (!wasLong.current) onInc(rk); };
   const close = () => { setMenu(null); setConfirmAll(false); };
 
-  const mi: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer", fontSize: "inherit", color: p.fg };
+  const mi: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", padding: "12px 20px", background: "none", border: "none", cursor: "pointer", fontSize: 16, color: p.fg };
 
   return (
     <>
@@ -289,10 +289,6 @@ export default function VocabPage() {
             </span>
             {/* Right: controls — stop propagation so they don't toggle details */}
             <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }} onClick={e => e.preventDefault()}>
-              <button data-testid="button-reset-all" onClick={() => { if (window.confirm("Сбросить все счётчики?")) resetAll(); }}
-                style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
-                сбросить все
-              </button>
               <span style={{ color: p.fgVeryMuted }}>
                 {revealedCount}/{totalCount}
               </span>
