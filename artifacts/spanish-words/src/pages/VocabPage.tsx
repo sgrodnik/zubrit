@@ -1,5 +1,4 @@
 import { useState, useCallback, useRef } from "react";
-import { Eye, EyeOff, BookOpen } from "lucide-react";
 
 interface Word {
   id: number;
@@ -40,12 +39,6 @@ function saveTaps(taps: Record<number, number>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(taps));
 }
 
-interface ContextMenu {
-  wordId: number;
-  x: number;
-  y: number;
-}
-
 function CounterCell({ wordId, count, onIncrement, onReset }: {
   wordId: number;
   count: number;
@@ -73,9 +66,7 @@ function CounterCell({ wordId, count, onIncrement, onReset }: {
   };
 
   const handleClick = () => {
-    if (!didLongPress.current) {
-      onIncrement(wordId);
-    }
+    if (!didLongPress.current) onIncrement(wordId);
   };
 
   return (
@@ -86,30 +77,24 @@ function CounterCell({ wordId, count, onIncrement, onReset }: {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
         onClick={handleClick}
-        className="w-full h-full flex items-center justify-center font-mono text-sm font-semibold text-foreground select-none cursor-pointer py-3.5 hover:bg-muted/40 active:bg-muted/60 transition-colors"
-        title="Нажмите чтобы добавить • Удержите чтобы сбросить"
+        style={{ fontVariantNumeric: "tabular-nums" }}
+        className="w-full h-full flex items-center justify-center text-sm text-black select-none cursor-pointer py-3"
       >
         {count}
       </button>
       {menu && (
         <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
           <div
-            className="fixed inset-0 z-40"
-            onClick={() => setMenu(null)}
-          />
-          <div
-            className="fixed z-50 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[140px] text-sm"
+            className="fixed z-50 bg-white border border-black text-sm"
             style={{ left: menu.x, top: menu.y }}
           >
             <button
               data-testid={`reset-${wordId}`}
-              className="w-full text-left px-4 py-2 text-destructive hover:bg-muted/60 transition-colors"
-              onClick={() => {
-                onReset(wordId);
-                setMenu(null);
-              }}
+              className="block w-full text-left px-4 py-2 hover:bg-black hover:text-white transition-colors"
+              onClick={() => { onReset(wordId); setMenu(null); }}
             >
-              Обнулить счётчик
+              Обнулить
             </button>
           </div>
         </>
@@ -158,88 +143,68 @@ export default function VocabPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto px-4 py-8">
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-              <BookOpen className="w-5 h-5 text-primary" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Испанские слова
-            </h1>
-          </div>
-          <p className="text-sm text-muted-foreground ml-12">
-            Нажмите на ячейку испанского слова, чтобы показать перевод
-          </p>
-        </div>
+    <div className="min-h-screen bg-white px-6 py-10 max-w-2xl mx-auto">
+      <div className="flex items-baseline justify-between mb-8">
+        <h1 className="text-base font-semibold tracking-tight text-black">
+          Испанские слова
+        </h1>
+        <button
+          data-testid="button-toggle-all"
+          onClick={toggleAll}
+          className="text-xs text-[#888] hover:text-black transition-colors"
+        >
+          {allRevealed ? "скрыть все" : "показать все"}
+        </button>
+      </div>
 
-        <div className="flex justify-end mb-5">
-          <button
-            data-testid="button-toggle-all"
-            onClick={toggleAll}
-            className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg hover:bg-muted/60"
-          >
-            {allRevealed ? (
-              <><EyeOff className="w-3.5 h-3.5" />Скрыть все</>
-            ) : (
-              <><Eye className="w-3.5 h-3.5" />Показать все</>
-            )}
-          </button>
-        </div>
-
-        <div className="rounded-xl border border-border overflow-hidden shadow-sm bg-card">
-          <div className="grid grid-cols-[1fr_64px_1fr] text-xs font-semibold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
-            <div className="px-4 py-3">Русский</div>
-            <div className="px-2 py-3 text-center border-x border-border">Статус</div>
-            <div className="px-4 py-3">Испанский</div>
-          </div>
-
-          {WORDS.map((word, idx) => {
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="text-[11px] uppercase tracking-widest text-[#888]">
+            <th className="text-left font-normal pb-3 pr-4 w-[44%]">Русский</th>
+            <th className="text-center font-normal pb-3 w-[12%]">Статус</th>
+            <th className="text-left font-normal pb-3 pl-4">Испанский</th>
+          </tr>
+        </thead>
+        <tbody>
+          {WORDS.map((word) => {
             const count = taps[word.id] ?? 0;
             const isRevealed = revealed.has(word.id);
 
             return (
-              <div
+              <tr
                 key={word.id}
                 data-testid={`row-word-${word.id}`}
-                className={`grid grid-cols-[1fr_64px_1fr] items-stretch ${idx < WORDS.length - 1 ? "border-b border-border" : ""}`}
+                className="group"
               >
-                <div className="px-4 py-3.5 text-sm text-foreground leading-snug flex items-center">
+                <td className="text-sm text-black py-3 pr-4 align-middle leading-snug">
                   {word.russian}
-                </div>
+                </td>
 
-                <div className="border-x border-border flex items-stretch">
+                <td className="text-center align-middle p-0">
                   <CounterCell
                     wordId={word.id}
                     count={count}
                     onIncrement={increment}
                     onReset={reset}
                   />
-                </div>
+                </td>
 
-                <div
+                <td
                   data-testid={`cell-spanish-${word.id}`}
                   onClick={() => toggleReveal(word.id)}
-                  className="px-4 py-3.5 cursor-pointer select-none flex items-center hover:bg-muted/20 transition-colors"
+                  className="pl-4 py-3 align-middle cursor-pointer"
                 >
                   {isRevealed ? (
-                    <span className="text-sm font-medium text-primary">
-                      {word.spanish}
-                    </span>
+                    <span className="text-sm text-black">{word.spanish}</span>
                   ) : (
-                    <span className="w-16 h-4 rounded bg-muted-foreground/15 inline-block" />
+                    <span className="inline-block w-14 h-3.5 rounded-sm bg-[#e0e0e0]" />
                   )}
-                </div>
-              </div>
+                </td>
+              </tr>
             );
           })}
-        </div>
-
-        <p className="text-center text-xs text-muted-foreground/60 mt-6">
-          Тап по испанскому — показать/скрыть &bull; Тап по числу — +1 &bull; Долгий тап — сбросить
-        </p>
-      </div>
+        </tbody>
+      </table>
     </div>
   );
 }
