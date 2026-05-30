@@ -36,7 +36,7 @@ function saveTaps(t: Record<string, number>) {
   localStorage.setItem(TAPS_KEY, JSON.stringify(t));
 }
 
-type Theme = "day" | "night" | "auto";
+type Theme = "day" | "night" | "auto" | "soft";
 interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; }
 
 function loadSettings(): Settings {
@@ -100,6 +100,14 @@ const DARK: Palette = {
   menuBg: "#1c1c1c", menuBorder: "#555",
   settingsBg: "#1c1c1c", warningBg: "#2a2000", warningBorder: "#a06000",
   counterColor: (n) => n === 0 ? "#2a2a2a" : n <= 2 ? "#555" : n === 3 ? "#ddd" : "#e05040",
+};
+
+const SOFT: Palette = {
+  bg: "#f7f3ec", fg: "#2e2a24", fgMuted: "#7a6f62", fgVeryMuted: "#c0b8ac",
+  divider: "#ede8e0", placeholder: "#d8d1c6",
+  menuBg: "#f7f3ec", menuBorder: "#8a7f72",
+  settingsBg: "#f7f3ec", warningBg: "#fdf3dc", warningBorder: "#b07820",
+  counterColor: (n) => n === 0 ? "#d8d1c6" : n <= 2 ? "#a89880" : n === 3 ? "#2e2a24" : "#a03020",
 };
 
 // ── Numbered textarea ─────────────────────────────────────────────────────────
@@ -207,7 +215,7 @@ export default function VocabPage() {
   }, []);
 
   const isDark = settings.theme === "night" || (settings.theme === "auto" && systemDark);
-  const p = isDark ? DARK : LIGHT;
+  const p = settings.theme === "soft" ? SOFT : isDark ? DARK : LIGHT;
 
   const handleRandomize = (val: boolean) => {
     if (val) setShuffledWords(shuffle(words));
@@ -315,11 +323,11 @@ export default function VocabPage() {
             <label style={lbl}>
               <span style={{ width: 120 }}>Тема</span>
               <span style={{ display: "flex", gap: "1rem" }}>
-                {(["day", "night", "auto"] as Theme[]).map(t => (
+                {(["day", "soft", "night", "auto"] as Theme[]).map(t => (
                   <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
                     <input type="radio" name="theme" value={t} checked={settings.theme === t}
                       onChange={() => setSettings(s => ({ ...s, theme: t }))} />
-                    {{ day: "День", night: "Ночь", auto: "Авто" }[t]}
+                    {{ day: "День", soft: "Мягкая", night: "Ночь", auto: "Авто" }[t]}
                   </label>
                 ))}
               </span>
