@@ -38,13 +38,17 @@ function saveTaps(taps: Record<number, number>) {
   localStorage.setItem(TAPS_KEY, JSON.stringify(taps));
 }
 
-interface Settings { fontSize: number; lineHeight: number; }
+interface Settings { fontSize: number; rowSpacing: number; }
 
 function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? JSON.parse(raw) : { fontSize: 14, lineHeight: 2.0 };
-  } catch { return { fontSize: 14, lineHeight: 2.0 }; }
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { fontSize: parsed.fontSize ?? 14, rowSpacing: parsed.rowSpacing ?? parsed.lineHeight ?? 8 };
+    }
+    return { fontSize: 14, rowSpacing: 8 };
+  } catch { return { fontSize: 14, rowSpacing: 8 }; }
 }
 
 function saveSettings(s: Settings) {
@@ -52,18 +56,20 @@ function saveSettings(s: Settings) {
 }
 
 function counterColor(count: number): string {
-  if (count === 0) return "#bbb";
-  if (count <= 2) return "#555";
+  if (count === 0) return "#d8d8d8";
+  if (count <= 2) return "#b0b0b0";
   if (count === 3) return "#000";
   return "#c0392b";
 }
 
-function CounterCell({ wordId, count, onIncrement, onDecrement, onReset }: {
+function CounterCell({ wordId, count, onIncrement, onDecrement, onReset, rowPadding, fontSize }: {
   wordId: number;
   count: number;
   onIncrement: (id: number) => void;
   onDecrement: (id: number) => void;
   onReset: (id: number) => void;
+  rowPadding: number;
+  fontSize: number;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,24 +103,36 @@ function CounterCell({ wordId, count, onIncrement, onDecrement, onReset }: {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
         onClick={handleClick}
-        style={{ color: counterColor(count), fontVariantNumeric: "tabular-nums", background: "none", border: "none", cursor: "pointer", padding: "0 8px", fontSize: "inherit" }}
+        style={{
+          color: counterColor(count),
+          fontVariantNumeric: "tabular-nums",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: `${rowPadding}px 8px`,
+          fontSize: fontSize,
+          lineHeight: 1,
+          display: "block",
+          width: "100%",
+          textAlign: "center",
+        }}
       >
         {count}
       </button>
       {menu && (
         <>
           <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setMenu(null)} />
-          <div style={{ position: "fixed", zIndex: 50, background: "#fff", border: "1px solid #000", left: menu.x, top: menu.y }}>
+          <div style={{ position: "fixed", zIndex: 50, background: "#fff", border: "1px solid #000", left: menu.x, top: menu.y, fontSize: 13 }}>
             <button
               data-testid={`decrement-${wordId}`}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer", fontSize: "inherit" }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer" }}
               onClick={() => { onDecrement(wordId); setMenu(null); }}
             >
               −1
             </button>
             <button
               data-testid={`reset-${wordId}`}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer", fontSize: "inherit" }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer" }}
               onClick={() => { onReset(wordId); setMenu(null); }}
             >
               Обнулить
@@ -169,12 +187,20 @@ export default function VocabPage() {
     setAllRevealed(!allRevealed);
   };
 
+  const cellStyle: React.CSSProperties = {
+    padding: `${settings.rowSpacing}px 0`,
+    verticalAlign: "middle",
+    lineHeight: 1,
+    borderTop: "1px solid #f0f0f0",
+  };
+
   return (
-    <div style={{ padding: "2rem", fontSize: settings.fontSize, lineHeight: settings.lineHeight }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.5rem" }}>
-        <strong>Испанские слова</strong>
+    <div style={{ padding: "2rem" }}>
+      {/* Header — fixed size, unaffected by settings */}
+      <div style={{ fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+        <strong style={{ fontSize: 15 }}>Испанские слова</strong>
         <div style={{ display: "flex", alignItems: "center", gap: "1.5rem" }}>
-          <label style={{ fontSize: "0.85em" }}>
+          <label>
             размер{" "}
             <input
               data-testid="input-font-size"
@@ -187,36 +213,36 @@ export default function VocabPage() {
             />
             {" "}{settings.fontSize}px
           </label>
-          <label style={{ fontSize: "0.85em" }}>
+          <label>
             интервал{" "}
             <input
-              data-testid="input-line-height"
+              data-testid="input-row-spacing"
               type="range"
-              min={1.2}
-              max={3.0}
-              step={0.1}
-              value={settings.lineHeight}
-              onChange={(e) => setSettings((s) => ({ ...s, lineHeight: Number(e.target.value) }))}
+              min={2}
+              max={20}
+              step={1}
+              value={settings.rowSpacing}
+              onChange={(e) => setSettings((s) => ({ ...s, rowSpacing: Number(e.target.value) }))}
               style={{ width: 70, verticalAlign: "middle" }}
             />
-            {" "}{settings.lineHeight.toFixed(1)}
           </label>
           <button
             data-testid="button-toggle-all"
             onClick={toggleAll}
-            style={{ background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: "0.85em", padding: 0 }}
+            style={{ background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}
           >
             {allRevealed ? "скрыть все" : "показать все"}
           </button>
         </div>
       </div>
 
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      {/* Table — affected by settings */}
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
         <thead>
-          <tr style={{ fontSize: "0.75em", textTransform: "uppercase", letterSpacing: "0.1em", color: "#999" }}>
-            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em" }}>Русский</th>
-            <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3em" }}>Статус</th>
-            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em" }}>Испанский</th>
+          <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "#bbb" }}>
+            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>Русский</th>
+            <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3em", lineHeight: 1 }}>Статус</th>
+            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>Испанский</th>
           </tr>
         </thead>
         <tbody>
@@ -225,24 +251,26 @@ export default function VocabPage() {
             const isRevealed = revealed.has(word.id);
             return (
               <tr key={word.id} data-testid={`row-word-${word.id}`}>
-                <td style={{ paddingRight: "1em", verticalAlign: "middle" }}>{word.russian}</td>
-                <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                <td style={{ ...cellStyle, paddingRight: "1em" }}>{word.russian}</td>
+                <td style={{ ...cellStyle, textAlign: "center", padding: 0 }}>
                   <CounterCell
                     wordId={word.id}
                     count={count}
                     onIncrement={increment}
                     onDecrement={decrement}
                     onReset={reset}
+                    rowPadding={settings.rowSpacing}
+                    fontSize={settings.fontSize}
                   />
                 </td>
                 <td
                   data-testid={`cell-spanish-${word.id}`}
                   onClick={() => toggleReveal(word.id)}
-                  style={{ paddingLeft: "1em", verticalAlign: "middle", cursor: "pointer" }}
+                  style={{ ...cellStyle, paddingLeft: "1em", cursor: "pointer" }}
                 >
                   {isRevealed
                     ? <span>{word.spanish}</span>
-                    : <span style={{ display: "inline-block", width: "4em", height: "0.65em", background: "#ddd", borderRadius: 2, verticalAlign: "middle" }} />
+                    : <span style={{ display: "inline-block", width: "4em", height: "0.6em", background: "#ddd", borderRadius: 2, verticalAlign: "middle" }} />
                   }
                 </td>
               </tr>
