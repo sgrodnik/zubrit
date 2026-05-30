@@ -264,35 +264,53 @@ export default function VocabPage() {
   const lnk: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: 13, color: p.fg };
   const lbl: React.CSSProperties = { display: "flex", alignItems: "center", gap: "0.75rem", color: p.fg };
 
+  const revealedCount = displayWords.filter(w => revealed.has(w.russian)).length;
+  const totalCount = displayWords.length;
+  const pct = totalCount > 0 ? Math.round((revealedCount / totalCount) * 100) : 0;
+
   return (
     <>
       <style>{`
         body { background: ${p.bg}; color: ${p.fg}; }
-        .zc { padding: 2rem; max-width: 680px; }
-        @media (max-width: 600px) { .zc { padding: 2rem 1rem; } }
+        .zc { padding: 1.5rem; max-width: 680px; }
+        @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; } }
+        details.zs > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; }
+        details.zs > summary::-webkit-details-marker { display: none; }
       `}</style>
 
       <div className="zc">
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-          <strong style={{ fontSize: 15, color: p.fg }}>Зубря</strong>
-          <button data-testid="button-toggle-all" onClick={toggleAll} style={lnk}>
-            {allRevealed ? "скрыть все" : "показать все"}
-          </button>
-        </div>
+        {/* Settings spoiler row */}
+        <details className="zs" style={{ marginBottom: "1.25rem" }}>
+          <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: p.fgMuted }}>
+            {/* Left: label + triangle */}
+            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              <span style={{ fontSize: 10 }}>▶</span>
+              <span>Настройки</span>
+            </span>
+            {/* Right: controls — stop propagation so they don't toggle details */}
+            <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }} onClick={e => e.preventDefault()}>
+              <button data-testid="button-reset-all" onClick={() => { if (window.confirm("Сбросить все счётчики?")) resetAll(); }}
+                style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
+                сбросить все
+              </button>
+              <span style={{ color: p.fgVeryMuted }}>
+                {revealedCount}/{totalCount}
+              </span>
+              <span style={{ color: p.fgVeryMuted }}>
+                {pct}%
+              </span>
+              <button data-testid="button-toggle-all" onClick={toggleAll} style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
+                {allRevealed ? "скрыть все" : "показать все"}
+              </button>
+            </span>
+          </summary>
 
-        {/* Settings */}
-        <details style={{ marginBottom: "1.5rem" }}>
-          <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: p.fgMuted }}>Настройки</summary>
           <div style={{ paddingTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
 
             {/* 1. Word list */}
             <div>
               <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
                 Список слов — по одной паре на строку, разделитель Tab или « — »
-              </div>
-              <div style={{ marginBottom: "0.4rem", fontSize: 12, color: p.warningBorder, background: p.warningBg, padding: "4px 8px", borderLeft: `2px solid ${p.warningBorder}` }}>
-                Если изменить текст русского слова в существующей строке — счётчик сложности для неё обнулится.
               </div>
               <NumberedTextarea value={wordsText} onChange={setWordsText} onBlur={applyWordsText} p={p} maxHeight={220} />
             </div>
@@ -333,29 +351,18 @@ export default function VocabPage() {
                 onChange={e => handleRandomize(e.target.checked)} />
             </label>
 
+            {/* 5. Complexity filter */}
+            {maxComplexity > 0 && (
+              <label style={lbl}>
+                <span style={{ width: 120 }}>Сложность ≥</span>
+                <input data-testid="input-filter" type="range" min={0} max={maxComplexity} step={1} value={filterLevel}
+                  onChange={e => setFilterLevel(+e.target.value)} style={{ flex: 1 }} />
+                <span style={{ width: 36, color: filterLevel > 0 ? p.fg : p.fgVeryMuted }}>{filterLevel}</span>
+              </label>
+            )}
+
           </div>
         </details>
-
-        {/* Complexity filter */}
-        {maxComplexity > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem", fontSize: 13, color: p.fgMuted }}>
-            <span style={{ whiteSpace: "nowrap" }}>Сложность ≥</span>
-            <input
-              data-testid="input-filter"
-              type="range" min={0} max={maxComplexity} step={1} value={filterLevel}
-              onChange={e => setFilterLevel(+e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <span style={{ minWidth: 24, textAlign: "right", color: filterLevel > 0 ? p.fg : p.fgVeryMuted }}>
-              {filterLevel}
-            </span>
-            {filterLevel > 0 && (
-              <button onClick={() => setFilterLevel(0)} style={{ background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: 13, color: p.fgMuted }}>
-                сбросить
-              </button>
-            )}
-          </div>
-        )}
 
         {/* Table */}
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
