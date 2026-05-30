@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 interface Word {
   id: number;
@@ -24,25 +24,45 @@ const WORDS: Word[] = [
   { id: 15, russian: "я упоминаю", spanish: "menciono" },
 ];
 
-const STORAGE_KEY = "spanish-vocab-taps";
+const TAPS_KEY = "spanish-vocab-taps";
+const SETTINGS_KEY = "spanish-vocab-settings";
 
 function loadTaps(): Record<number, number> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(TAPS_KEY);
     return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  } catch { return {}; }
 }
 
 function saveTaps(taps: Record<number, number>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(taps));
+  localStorage.setItem(TAPS_KEY, JSON.stringify(taps));
 }
 
-function CounterCell({ wordId, count, onIncrement, onReset }: {
+interface Settings { fontSize: number; lineHeight: number; }
+
+function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw ? JSON.parse(raw) : { fontSize: 14, lineHeight: 2.0 };
+  } catch { return { fontSize: 14, lineHeight: 2.0 }; }
+}
+
+function saveSettings(s: Settings) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+}
+
+function counterColor(count: number): string {
+  if (count === 0) return "#bbb";
+  if (count <= 2) return "#555";
+  if (count === 3) return "#000";
+  return "#c0392b";
+}
+
+function CounterCell({ wordId, count, onIncrement, onDecrement, onReset }: {
   wordId: number;
   count: number;
   onIncrement: (id: number) => void;
+  onDecrement: (id: number) => void;
   onReset: (id: number) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -77,21 +97,24 @@ function CounterCell({ wordId, count, onIncrement, onReset }: {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
         onClick={handleClick}
-        style={{ fontVariantNumeric: "tabular-nums" }}
-        className="w-full h-full flex items-center justify-center text-sm text-black select-none cursor-pointer py-3"
+        style={{ color: counterColor(count), fontVariantNumeric: "tabular-nums", background: "none", border: "none", cursor: "pointer", padding: "0 8px", fontSize: "inherit" }}
       >
         {count}
       </button>
       {menu && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
-          <div
-            className="fixed z-50 bg-white border border-black text-sm"
-            style={{ left: menu.x, top: menu.y }}
-          >
+          <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setMenu(null)} />
+          <div style={{ position: "fixed", zIndex: 50, background: "#fff", border: "1px solid #000", left: menu.x, top: menu.y }}>
+            <button
+              data-testid={`decrement-${wordId}`}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer", fontSize: "inherit" }}
+              onClick={() => { onDecrement(wordId); setMenu(null); }}
+            >
+              −1
+            </button>
             <button
               data-testid={`reset-${wordId}`}
-              className="block w-full text-left px-4 py-2 hover:bg-black hover:text-white transition-colors"
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer", fontSize: "inherit" }}
               onClick={() => { onReset(wordId); setMenu(null); }}
             >
               Обнулить
@@ -107,12 +130,14 @@ export default function VocabPage() {
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   const [taps, setTaps] = useState<Record<number, number>>(loadTaps);
   const [allRevealed, setAllRevealed] = useState(false);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+
+  useEffect(() => { saveSettings(settings); }, [settings]);
 
   const toggleReveal = useCallback((id: number) => {
     setRevealed((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }, []);
@@ -120,85 +145,105 @@ export default function VocabPage() {
   const increment = useCallback((id: number) => {
     setTaps((prev) => {
       const next = { ...prev, [id]: (prev[id] ?? 0) + 1 };
-      saveTaps(next);
-      return next;
+      saveTaps(next); return next;
+    });
+  }, []);
+
+  const decrement = useCallback((id: number) => {
+    setTaps((prev) => {
+      const next = { ...prev, [id]: Math.max(0, (prev[id] ?? 0) - 1) };
+      saveTaps(next); return next;
     });
   }, []);
 
   const reset = useCallback((id: number) => {
     setTaps((prev) => {
       const next = { ...prev, [id]: 0 };
-      saveTaps(next);
-      return next;
+      saveTaps(next); return next;
     });
   }, []);
 
   const toggleAll = () => {
-    if (allRevealed) {
-      setRevealed(new Set());
-    } else {
-      setRevealed(new Set(WORDS.map((w) => w.id)));
-    }
+    if (allRevealed) { setRevealed(new Set()); }
+    else { setRevealed(new Set(WORDS.map((w) => w.id))); }
     setAllRevealed(!allRevealed);
   };
 
   return (
-    <div className="min-h-screen bg-white px-6 py-10 max-w-2xl mx-auto">
-      <div className="flex items-baseline justify-between mb-8">
-        <h1 className="text-base font-semibold tracking-tight text-black">
-          Испанские слова
-        </h1>
-        <button
-          data-testid="button-toggle-all"
-          onClick={toggleAll}
-          className="text-xs text-[#888] hover:text-black transition-colors"
-        >
-          {allRevealed ? "скрыть все" : "показать все"}
-        </button>
+    <div style={{ padding: "2rem", fontSize: settings.fontSize, lineHeight: settings.lineHeight }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.5rem" }}>
+        <strong>Испанские слова</strong>
+        <div style={{ display: "flex", alignItems: "center", gap: "1.5rem" }}>
+          <label style={{ fontSize: "0.85em" }}>
+            размер{" "}
+            <input
+              data-testid="input-font-size"
+              type="range"
+              min={11}
+              max={22}
+              value={settings.fontSize}
+              onChange={(e) => setSettings((s) => ({ ...s, fontSize: Number(e.target.value) }))}
+              style={{ width: 70, verticalAlign: "middle" }}
+            />
+            {" "}{settings.fontSize}px
+          </label>
+          <label style={{ fontSize: "0.85em" }}>
+            интервал{" "}
+            <input
+              data-testid="input-line-height"
+              type="range"
+              min={1.2}
+              max={3.0}
+              step={0.1}
+              value={settings.lineHeight}
+              onChange={(e) => setSettings((s) => ({ ...s, lineHeight: Number(e.target.value) }))}
+              style={{ width: 70, verticalAlign: "middle" }}
+            />
+            {" "}{settings.lineHeight.toFixed(1)}
+          </label>
+          <button
+            data-testid="button-toggle-all"
+            onClick={toggleAll}
+            style={{ background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: "0.85em", padding: 0 }}
+          >
+            {allRevealed ? "скрыть все" : "показать все"}
+          </button>
+        </div>
       </div>
 
-      <table className="w-full border-collapse">
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr className="text-[11px] uppercase tracking-widest text-[#888]">
-            <th className="text-left font-normal pb-3 pr-4 w-[44%]">Русский</th>
-            <th className="text-center font-normal pb-3 w-[12%]">Статус</th>
-            <th className="text-left font-normal pb-3 pl-4">Испанский</th>
+          <tr style={{ fontSize: "0.75em", textTransform: "uppercase", letterSpacing: "0.1em", color: "#999" }}>
+            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em" }}>Русский</th>
+            <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3em" }}>Статус</th>
+            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em" }}>Испанский</th>
           </tr>
         </thead>
         <tbody>
           {WORDS.map((word) => {
             const count = taps[word.id] ?? 0;
             const isRevealed = revealed.has(word.id);
-
             return (
-              <tr
-                key={word.id}
-                data-testid={`row-word-${word.id}`}
-                className="group"
-              >
-                <td className="text-sm text-black py-3 pr-4 align-middle leading-snug">
-                  {word.russian}
-                </td>
-
-                <td className="text-center align-middle p-0">
+              <tr key={word.id} data-testid={`row-word-${word.id}`}>
+                <td style={{ paddingRight: "1em", verticalAlign: "middle" }}>{word.russian}</td>
+                <td style={{ textAlign: "center", verticalAlign: "middle" }}>
                   <CounterCell
                     wordId={word.id}
                     count={count}
                     onIncrement={increment}
+                    onDecrement={decrement}
                     onReset={reset}
                   />
                 </td>
-
                 <td
                   data-testid={`cell-spanish-${word.id}`}
                   onClick={() => toggleReveal(word.id)}
-                  className="pl-4 py-3 align-middle cursor-pointer"
+                  style={{ paddingLeft: "1em", verticalAlign: "middle", cursor: "pointer" }}
                 >
-                  {isRevealed ? (
-                    <span className="text-sm text-black">{word.spanish}</span>
-                  ) : (
-                    <span className="inline-block w-14 h-3.5 rounded-sm bg-[#e0e0e0]" />
-                  )}
+                  {isRevealed
+                    ? <span>{word.spanish}</span>
+                    : <span style={{ display: "inline-block", width: "4em", height: "0.65em", background: "#ddd", borderRadius: 2, verticalAlign: "middle" }} />
+                  }
                 </td>
               </tr>
             );
