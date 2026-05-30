@@ -103,8 +103,8 @@ const DARK: Palette = {
 };
 
 // ── Numbered textarea ─────────────────────────────────────────────────────────
-function NumberedTextarea({ value, onChange, onBlur, p }: {
-  value: string; onChange: (v: string) => void; onBlur: (v: string) => void; p: Palette;
+function NumberedTextarea({ value, onChange, onBlur, p, maxHeight }: {
+  value: string; onChange: (v: string) => void; onBlur: (v: string) => void; p: Palette; maxHeight?: number;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const numRef = useRef<HTMLDivElement>(null);
@@ -113,7 +113,7 @@ function NumberedTextarea({ value, onChange, onBlur, p }: {
     if (taRef.current && numRef.current) numRef.current.scrollTop = taRef.current.scrollTop;
   };
   return (
-    <div style={{ display: "flex", border: `1px solid ${p.fgVeryMuted}`, fontFamily: "monospace", fontSize: 12, lineHeight: "1.5", background: p.bg }}>
+    <div style={{ display: "flex", border: `1px solid ${p.fgVeryMuted}`, fontFamily: "monospace", fontSize: 12, lineHeight: "1.5", background: p.bg, maxHeight: maxHeight ?? undefined, overflow: "hidden" }}>
       <div ref={numRef} style={{ padding: "4px 6px", color: p.fgVeryMuted, textAlign: "right", userSelect: "none", overflow: "hidden", minWidth: 28, background: p.divider, borderRight: `1px solid ${p.divider}`, whiteSpace: "pre" }}>
         {Array.from({ length: lines }, (_, i) => i + 1).join("\n")}
       </div>
@@ -124,8 +124,7 @@ function NumberedTextarea({ value, onChange, onBlur, p }: {
         onChange={e => onChange(e.target.value)}
         onBlur={e => onBlur(e.target.value)}
         onScroll={syncScroll}
-        rows={10}
-        style={{ flex: 1, padding: "4px 6px", fontSize: 12, fontFamily: "monospace", lineHeight: "1.5", border: "none", outline: "none", resize: "vertical", boxSizing: "border-box", background: p.bg, color: p.fg }}
+        style={{ flex: 1, padding: "4px 6px", fontSize: 12, fontFamily: "monospace", lineHeight: "1.5", border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: p.bg, color: p.fg, height: maxHeight ?? "auto", overflowY: "auto" }}
       />
     </div>
   );
@@ -215,9 +214,20 @@ export default function VocabPage() {
     setSettings(s => ({ ...s, randomize: val }));
   };
 
-  const displayWords = useMemo(
+  const baseWords = useMemo(
     () => settings.randomize ? shuffledWords : words,
     [settings.randomize, shuffledWords, words]
+  );
+
+  // Filter — not persisted, resets on page reload
+  const [filterLevel, setFilterLevel] = useState(0);
+  const maxComplexity = useMemo(
+    () => Math.max(0, ...baseWords.map(w => taps[w.russian] ?? 0)),
+    [baseWords, taps]
+  );
+  const displayWords = useMemo(
+    () => filterLevel === 0 ? baseWords : baseWords.filter(w => (taps[w.russian] ?? 0) >= filterLevel),
+    [baseWords, taps, filterLevel]
   );
 
   const applyWordsText = (text: string) => {
@@ -276,6 +286,32 @@ export default function VocabPage() {
           <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: p.fgMuted }}>Настройки</summary>
           <div style={{ paddingTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
 
+            {/* 1. Word list */}
+            <div>
+              <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
+                Список слов — по одной паре на строку, разделитель Tab или « — »
+              </div>
+              <div style={{ marginBottom: "0.4rem", fontSize: 12, color: p.warningBorder, background: p.warningBg, padding: "4px 8px", borderLeft: `2px solid ${p.warningBorder}` }}>
+                Если изменить текст русского слова в существующей строке — счётчик сложности для неё обнулится.
+              </div>
+              <NumberedTextarea value={wordsText} onChange={setWordsText} onBlur={applyWordsText} p={p} maxHeight={220} />
+            </div>
+
+            {/* 2. Theme */}
+            <label style={lbl}>
+              <span style={{ width: 120 }}>Тема</span>
+              <span style={{ display: "flex", gap: "1rem" }}>
+                {(["day", "night", "auto"] as Theme[]).map(t => (
+                  <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
+                    <input type="radio" name="theme" value={t} checked={settings.theme === t}
+                      onChange={() => setSettings(s => ({ ...s, theme: t }))} />
+                    {{ day: "День", night: "Ночь", auto: "Авто" }[t]}
+                  </label>
+                ))}
+              </span>
+            </label>
+
+            {/* 3. Sliders */}
             <label style={lbl}>
               <span style={{ width: 120 }}>Размер шрифта</span>
               <input data-testid="input-font-size" type="range" min={8} max={32} value={settings.fontSize}
@@ -290,36 +326,36 @@ export default function VocabPage() {
               <span style={{ width: 36, color: p.fgMuted }}>{settings.rowSpacing}px</span>
             </label>
 
-            <label style={{ ...lbl, gap: "0.5rem" }}>
+            {/* 4. Random order */}
+            <label style={lbl}>
+              <span style={{ width: 120 }}>Случайный порядок</span>
               <input data-testid="input-randomize" type="checkbox" checked={settings.randomize}
                 onChange={e => handleRandomize(e.target.checked)} />
-              <span>Случайный порядок</span>
             </label>
 
-            <label style={lbl}>
-              <span style={{ width: 120 }}>Тема</span>
-              <span style={{ display: "flex", gap: "1rem" }}>
-                {(["day", "night", "auto"] as Theme[]).map(t => (
-                  <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
-                    <input type="radio" name="theme" value={t} checked={settings.theme === t}
-                      onChange={() => setSettings(s => ({ ...s, theme: t }))} />
-                    {{ day: "День", night: "Ночь", auto: "Авто" }[t]}
-                  </label>
-                ))}
-              </span>
-            </label>
-
-            <div style={{ marginTop: "0.4rem" }}>
-              <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
-                Список слов — по одной паре на строку, разделитель Tab или « — »
-              </div>
-              <div style={{ marginBottom: "0.4rem", fontSize: 12, color: p.warningBorder, background: p.warningBg, padding: "4px 8px", borderLeft: `2px solid ${p.warningBorder}` }}>
-                Если изменить текст русского слова в существующей строке — счётчик сложности для неё обнулится.
-              </div>
-              <NumberedTextarea value={wordsText} onChange={setWordsText} onBlur={applyWordsText} p={p} />
-            </div>
           </div>
         </details>
+
+        {/* Complexity filter */}
+        {maxComplexity > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem", fontSize: 13, color: p.fgMuted }}>
+            <span style={{ whiteSpace: "nowrap" }}>Сложность ≥</span>
+            <input
+              data-testid="input-filter"
+              type="range" min={0} max={maxComplexity} step={1} value={filterLevel}
+              onChange={e => setFilterLevel(+e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <span style={{ minWidth: 24, textAlign: "right", color: filterLevel > 0 ? p.fg : p.fgVeryMuted }}>
+              {filterLevel}
+            </span>
+            {filterLevel > 0 && (
+              <button onClick={() => setFilterLevel(0)} style={{ background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: 13, color: p.fgMuted }}>
+                сбросить
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Table */}
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
