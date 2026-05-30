@@ -24,76 +24,51 @@ const DEFAULT_WORDS_TEXT = [
   "я упоминаю\tmenciono",
 ].join("\n");
 
-// v2 uses russian text as key — immune to list reordering/insertion
 const TAPS_KEY = "spanish-vocab-taps-v2";
 const SETTINGS_KEY = "spanish-vocab-settings-v2";
 const WORDS_KEY = "spanish-vocab-words";
 
 function loadTaps(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(TAPS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem(TAPS_KEY) ?? "{}"); }
+  catch { return {}; }
+}
+function saveTaps(t: Record<string, number>) {
+  localStorage.setItem(TAPS_KEY, JSON.stringify(t));
 }
 
-function saveTaps(taps: Record<string, number>) {
-  localStorage.setItem(TAPS_KEY, JSON.stringify(taps));
-}
-
-interface Settings {
-  fontSize: number;
-  rowSpacing: number;
-  randomize: boolean;
-}
+type Theme = "day" | "night" | "auto";
+interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; }
 
 function loadSettings(): Settings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) {
-      const p = JSON.parse(raw);
-      return { fontSize: p.fontSize ?? 14, rowSpacing: p.rowSpacing ?? 8, randomize: p.randomize ?? false };
-    }
-  } catch {}
-  return { fontSize: 14, rowSpacing: 8, randomize: false };
+    const p = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
+    return {
+      fontSize: p.fontSize ?? 14,
+      rowSpacing: p.rowSpacing ?? 8,
+      randomize: p.randomize ?? false,
+      theme: p.theme ?? "auto",
+    };
+  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto" }; }
 }
+function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
-function saveSettings(s: Settings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-}
-
-function loadWordsText(): string {
-  return localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT;
-}
+function loadWordsText(): string { return localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT; }
 
 function parseWords(text: string): Word[] {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const result: Word[] = [];
-  lines.forEach((line, i) => {
-    let parts: string[];
-    if (line.includes("\t")) {
-      parts = line.split("\t");
-    } else if (line.includes(" — ")) {
-      parts = line.split(" — ");
-    } else if (line.includes(" - ")) {
-      parts = line.split(" - ");
-    } else {
-      return;
-    }
+  return text.split("\n").map(l => l.trim()).filter(Boolean).reduce<Word[]>((acc, line, i) => {
+    let parts: string[] = [];
+    if (line.includes("\t")) parts = line.split("\t");
+    else if (line.includes(" — ")) parts = line.split(" — ");
+    else if (line.includes(" - ")) parts = line.split(" - ");
+    else return acc;
     const russian = parts[0]?.trim();
     const spanish = parts[1]?.trim();
-    if (russian && spanish) result.push({ id: i + 1, russian, spanish });
-  });
-  return result;
+    if (russian && spanish) acc.push({ id: i + 1, russian, spanish });
+    return acc;
+  }, []);
 }
 
-function counterColor(count: number): string {
-  if (count === 0) return "#e8e8e8";
-  if (count <= 2) return "#b8b8b8";
-  if (count === 3) return "#000";
-  return "#c0392b";
-}
-
-function shuffleArray<T>(arr: T[]): T[] {
+function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -102,150 +77,106 @@ function shuffleArray<T>(arr: T[]): T[] {
   return a;
 }
 
-// Line-numbered textarea
-function NumberedTextarea({ value, onChange, onBlur }: {
-  value: string;
-  onChange: (v: string) => void;
-  onBlur: (v: string) => void;
+// ── Theme colours ─────────────────────────────────────────────────────────────
+interface Palette {
+  bg: string; fg: string; fgMuted: string; fgVeryMuted: string;
+  divider: string; placeholder: string;
+  menuBg: string; menuBorder: string;
+  settingsBg: string; warningBg: string; warningBorder: string;
+  counterColor: (n: number) => string;
+}
+
+const LIGHT: Palette = {
+  bg: "#fff", fg: "#000", fgMuted: "#555", fgVeryMuted: "#bbb",
+  divider: "#f2f2f2", placeholder: "#e0e0e0",
+  menuBg: "#fff", menuBorder: "#000",
+  settingsBg: "#fff", warningBg: "#fffbe6", warningBorder: "#e08000",
+  counterColor: (n) => n === 0 ? "#e8e8e8" : n <= 2 ? "#b8b8b8" : n === 3 ? "#000" : "#c0392b",
+};
+
+const DARK: Palette = {
+  bg: "#111", fg: "#ddd", fgMuted: "#888", fgVeryMuted: "#444",
+  divider: "#1e1e1e", placeholder: "#333",
+  menuBg: "#1c1c1c", menuBorder: "#555",
+  settingsBg: "#1c1c1c", warningBg: "#2a2000", warningBorder: "#a06000",
+  counterColor: (n) => n === 0 ? "#2a2a2a" : n <= 2 ? "#555" : n === 3 ? "#ddd" : "#e05040",
+};
+
+// ── Numbered textarea ─────────────────────────────────────────────────────────
+function NumberedTextarea({ value, onChange, onBlur, p }: {
+  value: string; onChange: (v: string) => void; onBlur: (v: string) => void; p: Palette;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const numRef = useRef<HTMLDivElement>(null);
-  const lineCount = value.split("\n").length;
-
+  const lines = value.split("\n").length;
   const syncScroll = () => {
-    if (taRef.current && numRef.current) {
-      numRef.current.scrollTop = taRef.current.scrollTop;
-    }
+    if (taRef.current && numRef.current) numRef.current.scrollTop = taRef.current.scrollTop;
   };
-
   return (
-    <div style={{ display: "flex", border: "1px solid #ddd", fontFamily: "monospace", fontSize: 12, lineHeight: "1.5" }}>
-      <div
-        ref={numRef}
-        style={{
-          padding: "4px 6px",
-          color: "#bbb",
-          textAlign: "right",
-          userSelect: "none",
-          overflow: "hidden",
-          minWidth: 28,
-          background: "#fafafa",
-          borderRight: "1px solid #eee",
-          whiteSpace: "pre",
-        }}
-      >
-        {Array.from({ length: lineCount }, (_, i) => i + 1).join("\n")}
+    <div style={{ display: "flex", border: `1px solid ${p.fgVeryMuted}`, fontFamily: "monospace", fontSize: 12, lineHeight: "1.5", background: p.bg }}>
+      <div ref={numRef} style={{ padding: "4px 6px", color: p.fgVeryMuted, textAlign: "right", userSelect: "none", overflow: "hidden", minWidth: 28, background: p.divider, borderRight: `1px solid ${p.divider}`, whiteSpace: "pre" }}>
+        {Array.from({ length: lines }, (_, i) => i + 1).join("\n")}
       </div>
       <textarea
         ref={taRef}
         data-testid="input-words"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={(e) => onBlur(e.target.value)}
+        onChange={e => onChange(e.target.value)}
+        onBlur={e => onBlur(e.target.value)}
         onScroll={syncScroll}
         rows={10}
-        style={{
-          flex: 1,
-          padding: "4px 6px",
-          fontSize: 12,
-          fontFamily: "monospace",
-          lineHeight: "1.5",
-          border: "none",
-          outline: "none",
-          resize: "vertical",
-          boxSizing: "border-box",
-        }}
+        style={{ flex: 1, padding: "4px 6px", fontSize: 12, fontFamily: "monospace", lineHeight: "1.5", border: "none", outline: "none", resize: "vertical", boxSizing: "border-box", background: p.bg, color: p.fg }}
       />
     </div>
   );
 }
 
-function CounterCell({ russianKey, count, onIncrement, onDecrement, onReset, onResetAll, rowPadding, fontSize }: {
-  russianKey: string;
-  count: number;
-  onIncrement: (key: string) => void;
-  onDecrement: (key: string) => void;
-  onReset: (key: string) => void;
-  onResetAll: () => void;
-  rowPadding: number;
-  fontSize: number;
+// ── Counter cell ──────────────────────────────────────────────────────────────
+function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding, fontSize, p }: {
+  rk: string; count: number;
+  onInc: (k: string) => void; onDec: (k: string) => void;
+  onReset: (k: string) => void; onResetAll: () => void;
+  rowPadding: number; fontSize: number; p: Palette;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const didLongPress = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasLong = useRef(false);
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    didLongPress.current = false;
-    longPressTimer.current = setTimeout(() => {
-      didLongPress.current = true;
-      setMenu({ x: e.clientX, y: e.clientY });
-    }, 500);
+  const onPointerDown = (e: React.PointerEvent) => {
+    wasLong.current = false;
+    timer.current = setTimeout(() => { wasLong.current = true; setMenu({ x: e.clientX, y: e.clientY }); }, 500);
   };
+  const onPointerUp = () => { if (timer.current) clearTimeout(timer.current); };
+  const onClick = () => { if (!wasLong.current) onInc(rk); };
+  const close = () => { setMenu(null); setConfirmAll(false); };
 
-  const handlePointerUp = () => {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
-  };
-
-  const handlePointerCancel = () => {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
-  };
-
-  const handleClick = () => {
-    if (!didLongPress.current) onIncrement(russianKey);
-  };
-
-  const closeMenu = () => { setMenu(null); setConfirmAll(false); };
+  const mi: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", padding: "6px 16px", background: "none", border: "none", cursor: "pointer", fontSize: "inherit", color: p.fg };
 
   return (
     <>
       <button
-        data-testid={`counter-${russianKey}`}
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
-        onClick={handleClick}
-        style={{
-          color: counterColor(count),
-          fontVariantNumeric: "tabular-nums",
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          padding: `${rowPadding}px 8px`,
-          fontSize: fontSize,
-          lineHeight: 1,
-          display: "block",
-          width: "100%",
-          textAlign: "center",
-          userSelect: "none",
-          WebkitUserSelect: "none",
-        }}
+        data-testid={`counter-${rk}`}
+        onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onClick={onClick}
+        style={{ color: p.counterColor(count), fontVariantNumeric: "tabular-nums", background: "none", border: "none", cursor: "pointer", padding: `${rowPadding}px 8px`, fontSize, lineHeight: 1, display: "block", width: "100%", textAlign: "center", userSelect: "none", WebkitUserSelect: "none" }}
       >
         {count}
       </button>
-
       {menu && (
         <>
-          <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={closeMenu} />
-          <div style={{ position: "fixed", zIndex: 50, background: "#fff", border: "1px solid #000", left: menu.x, top: menu.y, fontSize: 13, minWidth: 140 }}>
-            <button data-testid={`decrement-${russianKey}`} onClick={() => { onDecrement(russianKey); closeMenu(); }} style={menuItem}>
-              −1
-            </button>
-            <button data-testid={`reset-${russianKey}`} onClick={() => { onReset(russianKey); closeMenu(); }} style={menuItem}>
-              Обнулить это
-            </button>
-            <div style={{ borderTop: "1px solid #eee" }} />
-            {confirmAll ? (
-              <div style={{ padding: "6px 16px", display: "flex", gap: 8 }}>
-                <span style={{ color: "#999" }}>Точно?</span>
-                <button onClick={() => { onResetAll(); closeMenu(); }} style={{ ...menuItem, padding: 0, color: "#c0392b" }}>да</button>
-                <button onClick={() => setConfirmAll(false)} style={{ ...menuItem, padding: 0 }}>нет</button>
-              </div>
-            ) : (
-              <button data-testid="reset-all" onClick={() => setConfirmAll(true)} style={{ ...menuItem, color: "#c0392b" }}>
-                Сбросить все
-              </button>
-            )}
+          <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={close} />
+          <div style={{ position: "fixed", zIndex: 50, background: p.menuBg, border: `1px solid ${p.menuBorder}`, left: menu.x, top: menu.y, fontSize: 13, minWidth: 150, color: p.fg }}>
+            <button onClick={() => { onDec(rk); close(); }} style={mi}>−1</button>
+            <button onClick={() => { onReset(rk); close(); }} style={mi}>Обнулить это</button>
+            <div style={{ borderTop: `1px solid ${p.divider}` }} />
+            {confirmAll
+              ? <div style={{ padding: "6px 16px", display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ color: p.fgMuted }}>Точно?</span>
+                  <button onClick={() => { onResetAll(); close(); }} style={{ ...mi, padding: 0, color: "#c0392b" }}>да</button>
+                  <button onClick={() => setConfirmAll(false)} style={{ ...mi, padding: 0 }}>нет</button>
+                </div>
+              : <button onClick={() => setConfirmAll(true)} style={{ ...mi, color: "#c0392b" }}>Сбросить все</button>
+            }
           </div>
         </>
       )}
@@ -253,20 +184,9 @@ function CounterCell({ russianKey, count, onIncrement, onDecrement, onReset, onR
   );
 }
 
-const menuItem: React.CSSProperties = {
-  display: "block",
-  width: "100%",
-  textAlign: "left",
-  padding: "6px 16px",
-  background: "none",
-  border: "none",
-  cursor: "pointer",
-  fontSize: "inherit",
-  color: "inherit",
-};
-
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function VocabPage() {
-  const [wordsText, setWordsText] = useState<string>(loadWordsText);
+  const [wordsText, setWordsText] = useState(loadWordsText);
   const [words, setWords] = useState<Word[]>(() => parseWords(loadWordsText()));
   const [shuffledWords, setShuffledWords] = useState<Word[]>([]);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
@@ -276,191 +196,163 @@ export default function VocabPage() {
 
   useEffect(() => { saveSettings(settings); }, [settings]);
 
-  // When randomize toggled ON, shuffle once; OFF = original order
+  // Resolve active theme
+  const [systemDark, setSystemDark] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  const isDark = settings.theme === "night" || (settings.theme === "auto" && systemDark);
+  const p = isDark ? DARK : LIGHT;
+
   const handleRandomize = (val: boolean) => {
-    if (val) setShuffledWords(shuffleArray(words));
+    if (val) setShuffledWords(shuffle(words));
     setSettings(s => ({ ...s, randomize: val }));
   };
 
-  const displayWords = useMemo(() => {
-    return settings.randomize ? shuffledWords : words;
-  }, [settings.randomize, shuffledWords, words]);
+  const displayWords = useMemo(
+    () => settings.randomize ? shuffledWords : words,
+    [settings.randomize, shuffledWords, words]
+  );
 
   const applyWordsText = (text: string) => {
     localStorage.setItem(WORDS_KEY, text);
     const parsed = parseWords(text);
     setWords(parsed);
-    if (settings.randomize) setShuffledWords(shuffleArray(parsed));
-    // don't reset revealed — keys are russian text, stable
+    if (settings.randomize) setShuffledWords(shuffle(parsed));
   };
 
   const toggleReveal = useCallback((key: string) => {
-    setRevealed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
+    setRevealed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }, []);
 
   const toggleAll = () => {
     if (allRevealed) { setRevealed(new Set()); }
     else { setRevealed(new Set(displayWords.map(w => w.russian))); }
-    setAllRevealed(!allRevealed);
+    setAllRevealed(a => !a);
   };
 
-  const increment = useCallback((key: string) => {
-    setTaps((prev) => {
-      const next = { ...prev, [key]: (prev[key] ?? 0) + 1 };
-      saveTaps(next); return next;
-    });
-  }, []);
+  const inc = useCallback((k: string) => setTaps(p => { const n = { ...p, [k]: (p[k] ?? 0) + 1 }; saveTaps(n); return n; }), []);
+  const dec = useCallback((k: string) => setTaps(p => { const n = { ...p, [k]: Math.max(0, (p[k] ?? 0) - 1) }; saveTaps(n); return n; }), []);
+  const reset = useCallback((k: string) => setTaps(p => { const n = { ...p, [k]: 0 }; saveTaps(n); return n; }), []);
+  const resetAll = useCallback(() => { saveTaps({}); setTaps({}); }, []);
 
-  const decrement = useCallback((key: string) => {
-    setTaps((prev) => {
-      const next = { ...prev, [key]: Math.max(0, (prev[key] ?? 0) - 1) };
-      saveTaps(next); return next;
-    });
-  }, []);
-
-  const reset = useCallback((key: string) => {
-    setTaps((prev) => {
-      const next = { ...prev, [key]: 0 };
-      saveTaps(next); return next;
-    });
-  }, []);
-
-  const resetAll = useCallback(() => {
-    saveTaps({});
-    setTaps({});
-  }, []);
-
-  const cellStyle: React.CSSProperties = {
+  const cell: React.CSSProperties = {
     padding: `${settings.rowSpacing}px 0`,
     verticalAlign: "middle",
     lineHeight: 1,
-    borderTop: "1px solid #f2f2f2",
+    borderTop: `1px solid ${p.divider}`,
     userSelect: "none",
     WebkitUserSelect: "none",
   };
 
+  const lnk: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: 13, color: p.fg };
+  const lbl: React.CSSProperties = { display: "flex", alignItems: "center", gap: "0.75rem", color: p.fg };
+
   return (
-    <div style={{ padding: "2rem", maxWidth: 680 }}>
+    <>
+      <style>{`
+        body { background: ${p.bg}; color: ${p.fg}; }
+        .zc { padding: 2rem; max-width: 680px; }
+        @media (max-width: 600px) { .zc { padding: 2rem 1rem; } }
+      `}</style>
 
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <strong style={{ fontSize: 15 }}>Испанские слова</strong>
-        <button data-testid="button-toggle-all" onClick={toggleAll} style={linkBtn}>
-          {allRevealed ? "скрыть все" : "показать все"}
-        </button>
-      </div>
-
-      {/* Settings spoiler */}
-      <details style={{ marginBottom: "1.5rem" }}>
-        <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: "#555" }}>
-          настройки
-        </summary>
-        <div style={{ paddingTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13, color: "#333" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <span style={{ width: 110 }}>размер шрифта</span>
-            <input
-              data-testid="input-font-size"
-              type="range" min={11} max={22} value={settings.fontSize}
-              onChange={(e) => setSettings(s => ({ ...s, fontSize: Number(e.target.value) }))}
-              style={{ flex: 1 }}
-            />
-            <span style={{ width: 36, color: "#777" }}>{settings.fontSize}px</span>
-          </label>
-
-          <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <span style={{ width: 110 }}>интервал строк</span>
-            <input
-              data-testid="input-row-spacing"
-              type="range" min={2} max={20} step={1} value={settings.rowSpacing}
-              onChange={(e) => setSettings(s => ({ ...s, rowSpacing: Number(e.target.value) }))}
-              style={{ flex: 1 }}
-            />
-            <span style={{ width: 36, color: "#777" }}>{settings.rowSpacing}px</span>
-          </label>
-
-          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <input
-              data-testid="input-randomize"
-              type="checkbox"
-              checked={settings.randomize}
-              onChange={(e) => handleRandomize(e.target.checked)}
-            />
-            <span>случайный порядок</span>
-          </label>
-
-          <div style={{ marginTop: "0.4rem" }}>
-            <div style={{ marginBottom: "0.4rem", color: "#555" }}>
-              список слов — по одной паре на строку, разделитель Tab или « — »
-            </div>
-            <div style={{ marginBottom: "0.4rem", fontSize: 12, color: "#e08000", background: "#fffbe6", padding: "4px 8px", borderLeft: "2px solid #e08000" }}>
-              ⚠ Не вставляйте новые строки в начало или середину — статусы привязаны к тексту русского слова и сохранятся корректно. Только дописывайте в конец, либо редактируйте существующие строки.
-            </div>
-            <NumberedTextarea
-              value={wordsText}
-              onChange={setWordsText}
-              onBlur={applyWordsText}
-            />
-          </div>
+      <div className="zc">
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+          <strong style={{ fontSize: 15, color: p.fg }}>Зубря</strong>
+          <button data-testid="button-toggle-all" onClick={toggleAll} style={lnk}>
+            {allRevealed ? "скрыть все" : "показать все"}
+          </button>
         </div>
-      </details>
 
-      {/* Table */}
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
-        <thead>
-          <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "#ccc" }}>
-            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>Русский</th>
-            <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3em", lineHeight: 1 }}>Статус</th>
-            <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>Испанский</th>
-          </tr>
-        </thead>
-        <tbody>
-          {displayWords.map((word) => {
-            const count = taps[word.russian] ?? 0;
-            const isRevealed = revealed.has(word.russian);
-            return (
-              <tr key={word.russian} data-testid={`row-word-${word.id}`}>
-                <td style={{ ...cellStyle, paddingRight: "1em" }}>{word.russian}</td>
-                <td style={{ ...cellStyle, textAlign: "center", padding: 0 }}>
-                  <CounterCell
-                    russianKey={word.russian}
-                    count={count}
-                    onIncrement={increment}
-                    onDecrement={decrement}
-                    onReset={reset}
-                    onResetAll={resetAll}
-                    rowPadding={settings.rowSpacing}
-                    fontSize={settings.fontSize}
-                  />
-                </td>
-                <td
-                  data-testid={`cell-spanish-${word.id}`}
-                  onClick={() => toggleReveal(word.russian)}
-                  style={{ ...cellStyle, paddingLeft: "1em", cursor: "pointer" }}
-                >
-                  {isRevealed
-                    ? <span>{word.spanish}</span>
-                    : <span style={{ display: "inline-block", width: "4em", height: "0.6em", background: "#e0e0e0", borderRadius: 2, verticalAlign: "middle" }} />
-                  }
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+        {/* Settings */}
+        <details style={{ marginBottom: "1.5rem" }}>
+          <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: p.fgMuted }}>Настройки</summary>
+          <div style={{ paddingTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
+
+            <label style={lbl}>
+              <span style={{ width: 120 }}>Размер шрифта</span>
+              <input data-testid="input-font-size" type="range" min={8} max={32} value={settings.fontSize}
+                onChange={e => setSettings(s => ({ ...s, fontSize: +e.target.value }))} style={{ flex: 1 }} />
+              <span style={{ width: 36, color: p.fgMuted }}>{settings.fontSize}px</span>
+            </label>
+
+            <label style={lbl}>
+              <span style={{ width: 120 }}>Интервал строк</span>
+              <input data-testid="input-row-spacing" type="range" min={1} max={32} value={settings.rowSpacing}
+                onChange={e => setSettings(s => ({ ...s, rowSpacing: +e.target.value }))} style={{ flex: 1 }} />
+              <span style={{ width: 36, color: p.fgMuted }}>{settings.rowSpacing}px</span>
+            </label>
+
+            <label style={{ ...lbl, gap: "0.5rem" }}>
+              <input data-testid="input-randomize" type="checkbox" checked={settings.randomize}
+                onChange={e => handleRandomize(e.target.checked)} />
+              <span>Случайный порядок</span>
+            </label>
+
+            <label style={lbl}>
+              <span style={{ width: 120 }}>Тема</span>
+              <span style={{ display: "flex", gap: "1rem" }}>
+                {(["day", "night", "auto"] as Theme[]).map(t => (
+                  <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
+                    <input type="radio" name="theme" value={t} checked={settings.theme === t}
+                      onChange={() => setSettings(s => ({ ...s, theme: t }))} />
+                    {{ day: "День", night: "Ночь", auto: "Авто" }[t]}
+                  </label>
+                ))}
+              </span>
+            </label>
+
+            <div style={{ marginTop: "0.4rem" }}>
+              <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
+                Список слов — по одной паре на строку, разделитель Tab или « — »
+              </div>
+              <div style={{ marginBottom: "0.4rem", fontSize: 12, color: p.warningBorder, background: p.warningBg, padding: "4px 8px", borderLeft: `2px solid ${p.warningBorder}` }}>
+                Если изменить текст русского слова в существующей строке — счётчик сложности для неё обнулится.
+              </div>
+              <NumberedTextarea value={wordsText} onChange={setWordsText} onBlur={applyWordsText} p={p} />
+            </div>
+          </div>
+        </details>
+
+        {/* Table */}
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
+          <thead>
+            <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: p.fgVeryMuted }}>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>Русский</th>
+              <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3.5em", lineHeight: 1 }}>Сложность</th>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>Испанский</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayWords.map(word => {
+              const count = taps[word.russian] ?? 0;
+              const isRevealed = revealed.has(word.russian);
+              return (
+                <tr key={word.russian} data-testid={`row-word-${word.id}`}>
+                  <td style={{ ...cell, paddingRight: "1em", color: p.fg }}>{word.russian}</td>
+                  <td style={{ ...cell, textAlign: "center", padding: 0 }}>
+                    <CounterCell rk={word.russian} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
+                  </td>
+                  <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
+                    style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg }}>
+                    {isRevealed
+                      ? <span>{word.spanish}</span>
+                      : <span style={{ display: "inline-block", width: "4em", height: "0.6em", background: p.placeholder, borderRadius: 2, verticalAlign: "middle" }} />
+                    }
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
-
-const linkBtn: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  cursor: "pointer",
-  textDecoration: "underline",
-  padding: 0,
-  fontSize: 13,
-  color: "inherit",
-};
