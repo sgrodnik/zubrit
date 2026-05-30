@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Испанские слова"
+version = "1.0.0"
+id = "artifacts/spanish-words"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18307
+
+[services.development]
+run = "pnpm --filter @workspace/spanish-words run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/spanish-words", "run", "build" ]
+publicDir = "artifacts/spanish-words/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18307"
+BASE_PATH = "/"
