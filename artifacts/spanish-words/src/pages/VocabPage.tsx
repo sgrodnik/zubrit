@@ -6,7 +6,7 @@ interface Word {
   spanish: string;
 }
 
-const WORDS: Word[] = [
+const DEFAULT_WORDS: Word[] = [
   { id: 1, russian: "я предлагаю", spanish: "propongo" },
   { id: 2, russian: "я предлагаю / я советую", spanish: "sugiero" },
   { id: 3, russian: "я предполагаю", spanish: "supongo" },
@@ -24,8 +24,11 @@ const WORDS: Word[] = [
   { id: 15, russian: "я упоминаю", spanish: "menciono" },
 ];
 
+const DEFAULT_WORDS_TEXT = DEFAULT_WORDS.map(w => `${w.russian}\t${w.spanish}`).join("\n");
+
 const TAPS_KEY = "spanish-vocab-taps";
 const SETTINGS_KEY = "spanish-vocab-settings";
+const WORDS_KEY = "spanish-vocab-words";
 
 function loadTaps(): Record<number, number> {
   try {
@@ -44,20 +47,48 @@ function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw);
-      return { fontSize: parsed.fontSize ?? 14, rowSpacing: parsed.rowSpacing ?? parsed.lineHeight ?? 8 };
+      const p = JSON.parse(raw);
+      return { fontSize: p.fontSize ?? 14, rowSpacing: p.rowSpacing ?? 8 };
     }
-    return { fontSize: 14, rowSpacing: 8 };
-  } catch { return { fontSize: 14, rowSpacing: 8 }; }
+  } catch {}
+  return { fontSize: 14, rowSpacing: 8 };
 }
 
 function saveSettings(s: Settings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 }
 
+function loadWordsText(): string {
+  return localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT;
+}
+
+function parseWords(text: string): Word[] {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const result: Word[] = [];
+  lines.forEach((line, i) => {
+    // support tab, or " — ", or " - " as separator
+    let parts: string[];
+    if (line.includes("\t")) {
+      parts = line.split("\t");
+    } else if (line.includes(" — ")) {
+      parts = line.split(" — ");
+    } else if (line.includes(" - ")) {
+      parts = line.split(" - ");
+    } else {
+      return;
+    }
+    const russian = parts[0]?.trim();
+    const spanish = parts[1]?.trim();
+    if (russian && spanish) {
+      result.push({ id: i + 1, russian, spanish });
+    }
+  });
+  return result.length > 0 ? result : DEFAULT_WORDS;
+}
+
 function counterColor(count: number): string {
-  if (count === 0) return "#d8d8d8";
-  if (count <= 2) return "#b0b0b0";
+  if (count === 0) return "#e8e8e8";
+  if (count <= 2) return "#b8b8b8";
   if (count === 3) return "#000";
   return "#c0392b";
 }
@@ -115,6 +146,8 @@ function CounterCell({ wordId, count, onIncrement, onDecrement, onReset, rowPadd
           display: "block",
           width: "100%",
           textAlign: "center",
+          userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       >
         {count}
@@ -145,12 +178,23 @@ function CounterCell({ wordId, count, onIncrement, onDecrement, onReset, rowPadd
 }
 
 export default function VocabPage() {
+  const [wordsText, setWordsText] = useState<string>(loadWordsText);
+  const [words, setWords] = useState<Word[]>(() => parseWords(loadWordsText()));
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   const [taps, setTaps] = useState<Record<number, number>>(loadTaps);
   const [allRevealed, setAllRevealed] = useState(false);
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [confirmResetAll, setConfirmResetAll] = useState(false);
 
   useEffect(() => { saveSettings(settings); }, [settings]);
+
+  const applyWordsText = (text: string) => {
+    setWordsText(text);
+    localStorage.setItem(WORDS_KEY, text);
+    setWords(parseWords(text));
+    setRevealed(new Set());
+    setAllRevealed(false);
+  };
 
   const toggleReveal = useCallback((id: number) => {
     setRevealed((prev) => {
@@ -181,9 +225,16 @@ export default function VocabPage() {
     });
   }, []);
 
+  const resetAll = () => {
+    const next: Record<number, number> = {};
+    saveTaps(next);
+    setTaps(next);
+    setConfirmResetAll(false);
+  };
+
   const toggleAll = () => {
     if (allRevealed) { setRevealed(new Set()); }
-    else { setRevealed(new Set(WORDS.map((w) => w.id))); }
+    else { setRevealed(new Set(words.map((w) => w.id))); }
     setAllRevealed(!allRevealed);
   };
 
@@ -191,62 +242,87 @@ export default function VocabPage() {
     padding: `${settings.rowSpacing}px 0`,
     verticalAlign: "middle",
     lineHeight: 1,
-    borderTop: "1px solid #f0f0f0",
+    borderTop: "1px solid #f2f2f2",
+    userSelect: "none",
+    WebkitUserSelect: "none",
   };
 
   return (
-    <div style={{ padding: "2rem" }}>
-      {/* Header — fixed size, unaffected by settings */}
-      <div style={{ fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+    <div style={{ padding: "2rem", maxWidth: 680 }}>
+
+      {/* Header */}
+      <div style={{ fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
         <strong style={{ fontSize: 15 }}>Испанские слова</strong>
-        <div style={{ display: "flex", alignItems: "center", gap: "1.5rem" }}>
-          <label>
-            размер{" "}
-            <input
-              data-testid="input-font-size"
-              type="range"
-              min={11}
-              max={22}
-              value={settings.fontSize}
-              onChange={(e) => setSettings((s) => ({ ...s, fontSize: Number(e.target.value) }))}
-              style={{ width: 70, verticalAlign: "middle" }}
-            />
-            {" "}{settings.fontSize}px
-          </label>
-          <label>
-            интервал{" "}
-            <input
-              data-testid="input-row-spacing"
-              type="range"
-              min={2}
-              max={20}
-              step={1}
-              value={settings.rowSpacing}
-              onChange={(e) => setSettings((s) => ({ ...s, rowSpacing: Number(e.target.value) }))}
-              style={{ width: 70, verticalAlign: "middle" }}
-            />
-          </label>
-          <button
-            data-testid="button-toggle-all"
-            onClick={toggleAll}
-            style={{ background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}
-          >
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+          {confirmResetAll ? (
+            <span>
+              Сбросить всё?{" "}
+              <button onClick={resetAll} style={linkBtn}>да</button>
+              {" / "}
+              <button onClick={() => setConfirmResetAll(false)} style={linkBtn}>нет</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmResetAll(true)} style={linkBtn} data-testid="button-reset-all">
+              сбросить все
+            </button>
+          )}
+          <button data-testid="button-toggle-all" onClick={toggleAll} style={linkBtn}>
             {allRevealed ? "скрыть все" : "показать все"}
           </button>
         </div>
       </div>
 
-      {/* Table — affected by settings */}
+      {/* Settings spoiler */}
+      <details style={{ fontSize: 13, marginBottom: "1.5rem", color: "#999" }}>
+        <summary style={{ cursor: "pointer", userSelect: "none" }}>настройки</summary>
+        <div style={{ paddingTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <span style={{ width: 90 }}>размер шрифта</span>
+            <input
+              data-testid="input-font-size"
+              type="range" min={11} max={22} value={settings.fontSize}
+              onChange={(e) => setSettings((s) => ({ ...s, fontSize: Number(e.target.value) }))}
+              style={{ flex: 1 }}
+            />
+            <span style={{ width: 36 }}>{settings.fontSize}px</span>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <span style={{ width: 90 }}>интервал строк</span>
+            <input
+              data-testid="input-row-spacing"
+              type="range" min={2} max={20} step={1} value={settings.rowSpacing}
+              onChange={(e) => setSettings((s) => ({ ...s, rowSpacing: Number(e.target.value) }))}
+              style={{ flex: 1 }}
+            />
+            <span style={{ width: 36 }}>{settings.rowSpacing}px</span>
+          </label>
+          <div style={{ marginTop: "0.5rem" }}>
+            <div style={{ marginBottom: "0.3rem" }}>
+              слова (русский{"\t"}испанский, по одной паре на строку):
+            </div>
+            <textarea
+              data-testid="input-words"
+              value={wordsText}
+              onChange={(e) => setWordsText(e.target.value)}
+              onBlur={(e) => applyWordsText(e.target.value)}
+              rows={8}
+              style={{ width: "100%", fontSize: 12, fontFamily: "monospace", boxSizing: "border-box", resize: "vertical", padding: "0.4rem" }}
+            />
+          </div>
+        </div>
+      </details>
+
+      {/* Table */}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
         <thead>
-          <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "#bbb" }}>
+          <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "#ccc" }}>
             <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>Русский</th>
             <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3em", lineHeight: 1 }}>Статус</th>
             <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>Испанский</th>
           </tr>
         </thead>
         <tbody>
-          {WORDS.map((word) => {
+          {words.map((word) => {
             const count = taps[word.id] ?? 0;
             const isRevealed = revealed.has(word.id);
             return (
@@ -270,7 +346,7 @@ export default function VocabPage() {
                 >
                   {isRevealed
                     ? <span>{word.spanish}</span>
-                    : <span style={{ display: "inline-block", width: "4em", height: "0.6em", background: "#ddd", borderRadius: 2, verticalAlign: "middle" }} />
+                    : <span style={{ display: "inline-block", width: "4em", height: "0.6em", background: "#e0e0e0", borderRadius: 2, verticalAlign: "middle" }} />
                   }
                 </td>
               </tr>
@@ -281,3 +357,13 @@ export default function VocabPage() {
     </div>
   );
 }
+
+const linkBtn: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  textDecoration: "underline",
+  padding: 0,
+  fontSize: "inherit",
+  color: "inherit",
+};
