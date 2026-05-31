@@ -36,19 +36,22 @@ function saveTaps(t: Record<string, number>) {
   localStorage.setItem(TAPS_KEY, JSON.stringify(t));
 }
 
-type Theme = "day" | "night" | "auto" | "soft";
-interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; }
+type Theme = "day" | "night" | "auto";
+interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; }
 
 function loadSettings(): Settings {
   try {
     const p = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
+    const raw = p.theme;
+    const theme: Theme = raw === "day" || raw === "night" || raw === "auto" ? raw : "auto";
     return {
       fontSize: p.fontSize ?? 14,
       rowSpacing: p.rowSpacing ?? 8,
       randomize: p.randomize ?? false,
-      theme: p.theme ?? "auto",
+      theme,
+      soft: p.soft ?? false,
     };
-  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto" }; }
+  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto", soft: false }; }
 }
 function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
@@ -102,13 +105,23 @@ const DARK: Palette = {
   counterColor: (n) => n === 0 ? "#2a2a2a" : n <= 2 ? "#555" : n === 3 ? "#ddd" : "#e05040",
 };
 
-const SOFT: Palette = {
-  bg: "#f7f3ec", fg: "#2e2a24", fgMuted: "#7a6f62", fgVeryMuted: "#c0b8ac",
-  divider: "#ede8e0", placeholder: "#d8d1c6",
-  menuBg: "#f7f3ec", menuBorder: "#8a7f72",
-  settingsBg: "#f7f3ec", warningBg: "#fdf3dc", warningBorder: "#b07820",
-  counterColor: (n) => n === 0 ? "#d8d1c6" : n <= 2 ? "#a89880" : n === 3 ? "#2e2a24" : "#a03020",
-};
+function softenPalette(base: Palette, dark: boolean): Palette {
+  return dark ? {
+    ...base,
+    bg: "#1e1a14", fg: "#988e7a", fgMuted: "#635c50", fgVeryMuted: "#38332a",
+    divider: "#272218", placeholder: "#312c22",
+    menuBg: "#1e1a14", menuBorder: "#504840",
+    settingsBg: "#1e1a14", warningBg: "#25200e", warningBorder: "#706030",
+    counterColor: (n) => n === 0 ? "#312c22" : n <= 2 ? "#504840" : n === 3 ? "#988e7a" : "#b84832",
+  } : {
+    ...base,
+    bg: "#ede5d4", fg: "#443e38", fgMuted: "#8a7e70", fgVeryMuted: "#bdb4a8",
+    divider: "#dfd6c4", placeholder: "#cbc0b0",
+    menuBg: "#ede5d4", menuBorder: "#908070",
+    settingsBg: "#ede5d4", warningBg: "#f8eecc", warningBorder: "#a07820",
+    counterColor: (n) => n === 0 ? "#cbc0b0" : n <= 2 ? "#9c9080" : n === 3 ? "#443e38" : "#a02820",
+  };
+}
 
 // ── Numbered textarea ─────────────────────────────────────────────────────────
 function NumberedTextarea({ value, onChange, onBlur, p, maxHeight }: {
@@ -215,7 +228,8 @@ export default function VocabPage() {
   }, []);
 
   const isDark = settings.theme === "night" || (settings.theme === "auto" && systemDark);
-  const p = settings.theme === "soft" ? SOFT : isDark ? DARK : LIGHT;
+  const baseP = isDark ? DARK : LIGHT;
+  const p = settings.soft ? softenPalette(baseP, isDark) : baseP;
 
   const handleRandomize = (val: boolean) => {
     if (val) setShuffledWords(shuffle(words));
@@ -280,7 +294,7 @@ export default function VocabPage() {
     <>
       <style>{`
         body { background: ${p.bg}; color: ${p.fg}; }
-        .zc { padding: 1.5rem; max-width: 680px; }
+        .zc { padding: 1.5rem; max-width: 680px; margin: 0 auto; }
         @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; } }
         details.zs > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; }
         details.zs > summary::-webkit-details-marker { display: none; }
@@ -322,14 +336,19 @@ export default function VocabPage() {
             {/* 2. Theme */}
             <label style={lbl}>
               <span style={{ width: 120 }}>Тема</span>
-              <span style={{ display: "flex", gap: "1rem" }}>
-                {(["day", "soft", "night", "auto"] as Theme[]).map(t => (
+              <span style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+                {(["day", "night", "auto"] as Theme[]).map(t => (
                   <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
                     <input type="radio" name="theme" value={t} checked={settings.theme === t}
                       onChange={() => setSettings(s => ({ ...s, theme: t }))} />
-                    {{ day: "День", soft: "Мягкая", night: "Ночь", auto: "Авто" }[t]}
+                    {{ day: "День", night: "Ночь", auto: "Авто" }[t]}
                   </label>
                 ))}
+                <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fgMuted, borderLeft: `1px solid ${p.fgVeryMuted}`, paddingLeft: "1rem", marginLeft: "0.25rem" }}>
+                  <input type="checkbox" checked={settings.soft}
+                    onChange={e => setSettings(s => ({ ...s, soft: e.target.checked }))} />
+                  мягкая
+                </label>
               </span>
             </label>
 
