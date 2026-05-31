@@ -37,7 +37,7 @@ function saveTaps(t: Record<string, number>) {
 }
 
 type Theme = "day" | "night" | "auto";
-interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; }
+interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; maxWidth: number; }
 
 function loadSettings(): Settings {
   try {
@@ -50,8 +50,9 @@ function loadSettings(): Settings {
       randomize: p.randomize ?? false,
       theme,
       soft: p.soft ?? false,
+      maxWidth: p.maxWidth ?? 680,
     };
-  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto", soft: false }; }
+  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto", soft: false, maxWidth: 680 }; }
 }
 function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
@@ -294,10 +295,12 @@ export default function VocabPage() {
     <>
       <style>{`
         body { background: ${p.bg}; color: ${p.fg}; }
-        .zc { padding: 1.5rem; max-width: 680px; margin: 0 auto; }
+        .zc { padding: 1.5rem; max-width: ${settings.maxWidth}px; margin: 0 auto; }
         @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; } }
         details.zs > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; }
         details.zs > summary::-webkit-details-marker { display: none; }
+        .zw { display: flex; }
+        @media (max-width: 600px) { .zw { display: none; } }
       `}</style>
 
       <div className="zc">
@@ -367,7 +370,15 @@ export default function VocabPage() {
               <span style={{ width: 36, color: p.fgMuted }}>{settings.rowSpacing}px</span>
             </label>
 
-            {/* 4. Random order */}
+            {/* 4. Width (desktop only) */}
+            <label className="zw" style={lbl}>
+              <span style={{ width: 120 }}>Ширина</span>
+              <input type="range" min={400} max={1400} step={20} value={settings.maxWidth}
+                onChange={e => setSettings(s => ({ ...s, maxWidth: +e.target.value }))} style={{ flex: 1 }} />
+              <span style={{ width: 36, color: p.fgMuted }}>{settings.maxWidth}</span>
+            </label>
+
+            {/* 5. Random order */}
             <label style={lbl}>
               <span style={{ width: 120 }}>Случайный порядок</span>
               <input data-testid="input-randomize" type="checkbox" checked={settings.randomize}
