@@ -1,14 +1,7 @@
 # zubrit
 
-Инструмент для создания веб-страниц и изучения испанских слов.
+Minimalist web trainer for memorizing foreign words and phrases.
 
-## Особенности
-- Монорепозиторий на базе pnpm workspaces.
-- React-приложение для изучения лексики (`spanish-words`).
-- Автоматический деплой на GitHub Pages через GitHub Actions.
-
-## Разработка
-```bash
-pnpm install
-pnpm run build
-```
+- **List-based entry**: Easily add words as a text list.
+- **Tap-to-reveal**: Interactive table mode to reveal translations one by one.
+- **Difficulty filtering**: Focus on specific words by filtering based on mastery level.
