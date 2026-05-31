@@ -28,6 +28,59 @@ const TAPS_KEY = "spanish-vocab-taps-v2";
 const SETTINGS_KEY = "spanish-vocab-settings-v2";
 const WORDS_KEY = "spanish-vocab-words";
 
+const LANGUAGES = {
+  ru: {
+    settings: "Настройки",
+    hideAll: "скрыть все",
+    showAll: "показать все",
+    wordListHint: "Список слов — по одной паре на строку, разделитель Tab или « — »",
+    theme: "Тема",
+    themeDay: "День",
+    themeNight: "Ночь",
+    themeAuto: "Авто",
+    soft: "мягкая",
+    fontSize: "Размер шрифта",
+    rowSpacing: "Интервал строк",
+    width: "Ширина",
+    randomOrder: "Случайный порядок",
+    complexityFilter: "Сложность ≥",
+    russian: "Русский",
+    complexity: "Сложность",
+    spanish: "Испанский",
+    resetThis: "Обнулить это",
+    sure: "Точно?",
+    yes: "да",
+    no: "нет",
+    resetAll: "Сбросить все",
+  },
+  en: {
+    settings: "Settings",
+    hideAll: "hide all",
+    showAll: "show all",
+    wordListHint: "Word list — one pair per line, separator Tab or ' — '",
+    theme: "Theme",
+    themeDay: "Day",
+    themeNight: "Night",
+    themeAuto: "Auto",
+    soft: "soft",
+    fontSize: "Font size",
+    rowSpacing: "Row spacing",
+    width: "Width",
+    randomOrder: "Random order",
+    complexityFilter: "Complexity ≥",
+    russian: "Russian",
+    complexity: "Complexity",
+    spanish: "Spanish",
+    resetThis: "Reset this",
+    sure: "Are you sure?",
+    yes: "yes",
+    no: "no",
+    resetAll: "Reset all",
+  }
+};
+
+const getLang = () => (typeof navigator !== "undefined" && navigator.language.startsWith("ru")) ? "ru" : "en";
+
 function loadTaps(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(TAPS_KEY) ?? "{}"); }
   catch { return {}; }
@@ -172,6 +225,7 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
   const onClick = () => { if (!wasLong.current) onInc(rk); };
   const close = () => { setMenu(null); setConfirmAll(false); };
 
+  const t = LANGUAGES[getLang()];
   const mi: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", padding: "12px 20px", background: "none", border: "none", cursor: "pointer", fontSize: 16, color: p.fg };
 
   return (
@@ -188,15 +242,15 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
           <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={close} />
           <div style={{ position: "fixed", zIndex: 50, background: p.menuBg, border: `1px solid ${p.menuBorder}`, left: menu.x, top: menu.y, fontSize: 13, minWidth: 150, color: p.fg }}>
             <button onClick={() => { onDec(rk); close(); }} style={mi}>−1</button>
-            <button onClick={() => { onReset(rk); close(); }} style={mi}>Обнулить это</button>
+            <button onClick={() => { onReset(rk); close(); }} style={mi}>{t.resetThis}</button>
             <div style={{ borderTop: `1px solid ${p.divider}` }} />
             {confirmAll
               ? <div style={{ padding: "6px 16px", display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ color: p.fgMuted }}>Точно?</span>
-                  <button onClick={() => { onResetAll(); close(); }} style={{ ...mi, padding: 0, color: "#c0392b" }}>да</button>
-                  <button onClick={() => setConfirmAll(false)} style={{ ...mi, padding: 0 }}>нет</button>
+                  <span style={{ color: p.fgMuted }}>{t.sure}</span>
+                  <button onClick={() => { onResetAll(); close(); }} style={{ ...mi, padding: 0, color: "#c0392b" }}>{t.yes}</button>
+                  <button onClick={() => setConfirmAll(false)} style={{ ...mi, padding: 0 }}>{t.no}</button>
                 </div>
-              : <button onClick={() => setConfirmAll(true)} style={{ ...mi, color: "#c0392b" }}>Сбросить все</button>
+              : <button onClick={() => setConfirmAll(true)} style={{ ...mi, color: "#c0392b" }}>{t.resetAll}</button>
             }
           </div>
         </>
@@ -291,6 +345,8 @@ export default function VocabPage() {
   const totalCount = displayWords.length;
   const pct = totalCount > 0 ? Math.round((revealedCount / totalCount) * 100) : 0;
 
+  const t = LANGUAGES[getLang()];
+
   return (
     <>
       <style>{`
@@ -310,7 +366,7 @@ export default function VocabPage() {
             {/* Left: label + triangle */}
             <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               <span style={{ fontSize: 10 }}>▶</span>
-              <span>Настройки</span>
+              <span>{t.settings}</span>
             </span>
             {/* Right: controls — stop propagation so they don't toggle details */}
             <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }} onClick={e => e.preventDefault()}>
@@ -321,7 +377,7 @@ export default function VocabPage() {
                 {pct}%
               </span>
               <button data-testid="button-toggle-all" onClick={toggleAll} style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
-                {allRevealed ? "скрыть все" : "показать все"}
+                {allRevealed ? t.hideAll : t.showAll}
               </button>
             </span>
           </summary>
@@ -331,40 +387,40 @@ export default function VocabPage() {
             {/* 1. Word list */}
             <div>
               <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
-                Список слов — по одной паре на строку, разделитель Tab или « — »
+                {t.wordListHint}
               </div>
               <NumberedTextarea value={wordsText} onChange={setWordsText} onBlur={applyWordsText} p={p} maxHeight={220} />
             </div>
 
             {/* 2. Theme */}
             <label style={lbl}>
-              <span style={{ width: 120 }}>Тема</span>
+              <span style={{ width: 120 }}>{t.theme}</span>
               <span style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
-                {(["day", "night", "auto"] as Theme[]).map(t => (
-                  <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
-                    <input type="radio" name="theme" value={t} checked={settings.theme === t}
-                      onChange={() => setSettings(s => ({ ...s, theme: t }))} />
-                    {{ day: "День", night: "Ночь", auto: "Авто" }[t]}
+                {(["day", "night", "auto"] as Theme[]).map(themeKey => (
+                  <label key={themeKey} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
+                    <input type="radio" name="theme" value={themeKey} checked={settings.theme === themeKey}
+                      onChange={() => setSettings(s => ({ ...s, theme: themeKey }))} />
+                    {{ day: t.themeDay, night: t.themeNight, auto: t.themeAuto }[themeKey]}
                   </label>
                 ))}
                 <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fgMuted, borderLeft: `1px solid ${p.fgVeryMuted}`, paddingLeft: "1rem", marginLeft: "0.25rem" }}>
                   <input type="checkbox" checked={settings.soft}
                     onChange={e => setSettings(s => ({ ...s, soft: e.target.checked }))} />
-                  мягкая
+                  {t.soft}
                 </label>
               </span>
             </label>
 
             {/* 3. Sliders */}
             <label style={lbl}>
-              <span style={{ width: 120 }}>Размер шрифта</span>
+              <span style={{ width: 120 }}>{t.fontSize}</span>
               <input data-testid="input-font-size" type="range" min={8} max={32} value={settings.fontSize}
                 onChange={e => setSettings(s => ({ ...s, fontSize: +e.target.value }))} style={{ flex: 1 }} />
               <span style={{ width: 36, color: p.fgMuted }}>{settings.fontSize}px</span>
             </label>
 
             <label style={lbl}>
-              <span style={{ width: 120 }}>Интервал строк</span>
+              <span style={{ width: 120 }}>{t.rowSpacing}</span>
               <input data-testid="input-row-spacing" type="range" min={1} max={32} value={settings.rowSpacing}
                 onChange={e => setSettings(s => ({ ...s, rowSpacing: +e.target.value }))} style={{ flex: 1 }} />
               <span style={{ width: 36, color: p.fgMuted }}>{settings.rowSpacing}px</span>
@@ -372,7 +428,7 @@ export default function VocabPage() {
 
             {/* 4. Width (desktop only) */}
             <label className="zw" style={lbl}>
-              <span style={{ width: 120 }}>Ширина</span>
+              <span style={{ width: 120 }}>{t.width}</span>
               <input type="range" min={400} max={1400} step={20} value={settings.maxWidth}
                 onChange={e => setSettings(s => ({ ...s, maxWidth: +e.target.value }))} style={{ flex: 1 }} />
               <span style={{ width: 36, color: p.fgMuted }}>{settings.maxWidth}</span>
@@ -380,7 +436,7 @@ export default function VocabPage() {
 
             {/* 5. Random order */}
             <label style={lbl}>
-              <span style={{ width: 120 }}>Случайный порядок</span>
+              <span style={{ width: 120 }}>{t.randomOrder}</span>
               <input data-testid="input-randomize" type="checkbox" checked={settings.randomize}
                 onChange={e => handleRandomize(e.target.checked)} />
             </label>
@@ -388,7 +444,7 @@ export default function VocabPage() {
             {/* 5. Complexity filter */}
             {maxComplexity > 0 && (
               <label style={lbl}>
-                <span style={{ width: 120 }}>Сложность ≥</span>
+                <span style={{ width: 120 }}>{t.complexityFilter}</span>
                 <input data-testid="input-filter" type="range" min={0} max={maxComplexity} step={1} value={filterLevel}
                   onChange={e => setFilterLevel(+e.target.value)} style={{ flex: 1 }} />
                 <span style={{ width: 36, color: filterLevel > 0 ? p.fg : p.fgVeryMuted }}>{filterLevel}</span>
@@ -402,9 +458,9 @@ export default function VocabPage() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
           <thead>
             <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: p.fgVeryMuted }}>
-              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>Русский</th>
-              <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3.5em", lineHeight: 1 }}>Сложность</th>
-              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>Испанский</th>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{t.russian}</th>
+              <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3.5em", lineHeight: 1 }}>{t.complexity}</th>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{t.spanish}</th>
             </tr>
           </thead>
           <tbody>
