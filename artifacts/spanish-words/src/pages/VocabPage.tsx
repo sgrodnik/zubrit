@@ -263,11 +263,13 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
 export default function VocabPage() {
   const [wordsText, setWordsText] = useState(loadWordsText);
   const [words, setWords] = useState<Word[]>(() => parseWords(loadWordsText()));
-  const [shuffledWords, setShuffledWords] = useState<Word[]>([]);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
+    settings.randomize ? shuffle(words) : []
+  );
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [taps, setTaps] = useState<Record<string, number>>(loadTaps);
   const [allRevealed, setAllRevealed] = useState(false);
-  const [settings, setSettings] = useState<Settings>(loadSettings);
 
   useEffect(() => { saveSettings(settings); }, [settings]);
 
