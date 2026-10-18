@@ -159,7 +159,7 @@ function loadLessonState(): LessonState {
   } catch { /* ignore malformed settings */ }
   const lesson: Lesson = {
     id: `lesson-${now}`,
-    name: "Урок ноль",
+    name: getLang() === "ru" ? "Урок ноль" : "Lesson zero",
     wordsText,
     createdAt: now,
     updatedAt: now,
@@ -210,6 +210,19 @@ const LANGUAGES = {
     today: "сегодня",
     daysAgo: "д назад",
     noActivity: "нет активности",
+    lesson: "Урок",
+    newLesson: "Новый урок",
+    lessonNamePlaceholder: "Название урока",
+    copyLesson: "Скопировать слова и сложность текущего урока",
+    cancel: "Отмена",
+    create: "Создать",
+    deleteConfirm: "Удалить урок «{name}»?",
+    unsupportedBackup: "Неподдерживаемый формат файла или нет уроков",
+    invalidLessonData: "Некорректные данные урока №{index}",
+    importConfirm: "Импорт заменит все текущие уроки и настройки. Продолжить?",
+    importSuccess: "Данные импортированы",
+    importFailure: "Не удалось импортировать файл: {message}",
+    importFailureUnknown: "Не удалось импортировать файл",
   },
   en: {
     settings: "Settings",
@@ -252,6 +265,19 @@ const LANGUAGES = {
     today: "today",
     daysAgo: "d ago",
     noActivity: "no activity",
+    lesson: "Lesson",
+    newLesson: "New lesson",
+    lessonNamePlaceholder: "Lesson name",
+    copyLesson: "Copy words and complexity from the current lesson",
+    cancel: "Cancel",
+    create: "Create",
+    deleteConfirm: "Delete lesson “{name}”?",
+    unsupportedBackup: "Unsupported file format or no lessons found",
+    invalidLessonData: "Invalid data for lesson #{index}",
+    importConfirm: "Importing will replace all current lessons and settings. Continue?",
+    importSuccess: "Data imported",
+    importFailure: "Could not import file: {message}",
+    importFailureUnknown: "Could not import file",
   }
 };
 
@@ -408,7 +434,7 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
   return (
     <>
       <button
-        aria-label={`Сложность ${rk}: ${count}`}
+        aria-label={`${t.complexity} ${rk}: ${count}`}
         data-testid={`counter-${rk}`}
         onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onClick={onClick}
         style={{ color: p.counterColor(count), fontVariantNumeric: "tabular-nums", background: "none", border: "none", cursor: "pointer", padding: `${rowPadding}px 8px`, fontSize, lineHeight: 1, display: "block", width: "100%", textAlign: "center", userSelect: "none", WebkitUserSelect: "none" }}
@@ -441,6 +467,7 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
 export default function VocabPage() {
   const [lessonState, setLessonState] = useState<LessonState>(loadLessonState);
   const activeLesson = lessonState.lessons.find(lesson => lesson.id === lessonState.activeId) ?? lessonState.lessons[0];
+  const t = LANGUAGES[getLang()];
   const wordsText = activeLesson.wordsText;
   const words = useMemo(() => parseWords(wordsText), [wordsText]);
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -651,7 +678,7 @@ export default function VocabPage() {
   };
 
   const deleteCurrentLesson = () => {
-    if (lessonState.lessons.length <= 1 || !window.confirm(`Удалить урок «${activeLesson.name}»?`)) return;
+    if (lessonState.lessons.length <= 1 || !window.confirm(t.deleteConfirm.replace("{name}", activeLesson.name))) return;
     const index = lessonState.lessons.findIndex(lesson => lesson.id === activeLesson.id);
     const remaining = lessonState.lessons.filter(lesson => lesson.id !== activeLesson.id);
     setLessonState({ lessons: remaining, activeId: remaining[Math.max(0, index - 1)].id });
@@ -711,13 +738,13 @@ export default function VocabPage() {
     try {
       const backup = JSON.parse(await file.text());
       if (backup?.format !== BACKUP_FORMAT || backup?.version !== BACKUP_VERSION || !Array.isArray(backup.lessons) || backup.lessons.length === 0) {
-        throw new Error("Неподдерживаемый формат файла или нет уроков");
+        throw new Error(t.unsupportedBackup);
       }
       const now = Date.now();
       const ids = new Set<string>();
       const lessons: Lesson[] = backup.lessons.map((item: any, index: number) => {
         if (!item || typeof item.name !== "string" || !item.name.trim() || typeof item.wordsText !== "string") {
-          throw new Error(`Некорректные данные урока №${index + 1}`);
+          throw new Error(t.invalidLessonData.replace("{index}", String(index + 1)));
         }
         let id = typeof item.id === "string" && item.id ? item.id : `import-${now}-${index}`;
         while (ids.has(id)) id = `${id}-${index + 1}`;
@@ -731,16 +758,16 @@ export default function VocabPage() {
           studySecondsByDate: normalizeStudySeconds(item.studySecondsByDate),
         };
       });
-      if (!window.confirm("Импорт заменит все текущие уроки и настройки. Продолжить?")) return;
+      if (!window.confirm(t.importConfirm)) return;
       const activeId = lessons.some(lesson => lesson.id === backup.activeLessonId) ? backup.activeLessonId : lessons[0].id;
       setLessonState({ lessons, activeId });
       setSettings(normalizeSettings(backup.settings));
       setRevealed(new Set());
       setAllRevealed(false);
       setFilterLevel(0);
-      window.alert("Данные импортированы");
+      window.alert(t.importSuccess);
     } catch (error) {
-      window.alert(error instanceof Error ? `Не удалось импортировать файл: ${error.message}` : "Не удалось импортировать файл");
+      window.alert(error instanceof Error ? t.importFailure.replace("{message}", error.message) : t.importFailureUnknown);
     }
   };
 
@@ -760,7 +787,6 @@ export default function VocabPage() {
   const totalCount = displayWords.length;
   const pct = totalCount > 0 ? Math.round((revealedCount / totalCount) * 100) : 0;
 
-  const t = LANGUAGES[getLang()];
   const languagePair = wordsText.match(/^\s*#lang\s+(\S+)\s+(.+?)\s*$/m);
   const firstLanguage = languagePair?.[1] ?? t.russian;
   const secondLanguage = languagePair?.[2] ?? t.spanish;
@@ -789,7 +815,7 @@ export default function VocabPage() {
 
       <div className="zc">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: "1rem" }}>
-          <select aria-label="Урок" value={activeLesson.id} onChange={event => {
+          <select aria-label={t.lesson} value={activeLesson.id} onChange={event => {
             setLessonState(state => ({ ...state, activeId: event.target.value }));
             setRevealed(new Set());
             setAllRevealed(false);
@@ -798,7 +824,7 @@ export default function VocabPage() {
             {sortedLessons.map((lesson, index) => <option key={lesson.id} value={lesson.id}>{sortedLessons.length - index}. {lesson.name} — {lessonStudySummary(lesson, todayStudyDate, t)}</option>)}
           </select>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ Новый урок</button>
+            <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ {t.newLesson}</button>
             <button type="button" onClick={() => { setNewLessonName(activeLesson.name); setLessonDetailsOpen(true); }} style={lnk}>{t.details}</button>
           </div>
         </div>
@@ -842,14 +868,14 @@ export default function VocabPage() {
           </form>
         </div>}
 
-        {createLessonOpen && <div role="dialog" aria-modal="true" aria-label="Новый урок" style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
+        {createLessonOpen && <div role="dialog" aria-modal="true" aria-label={t.newLesson} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
           <form onSubmit={event => { event.preventDefault(); createLesson(); }} style={{ width: "min(360px, 100%)", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 12 }}>
-            <strong>Новый урок</strong>
-            <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} placeholder="Название урока" required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={copyLesson} onChange={event => setCopyLesson(event.target.checked)} />Скопировать слова и сложность текущего урока</label>
+            <strong>{t.newLesson}</strong>
+            <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} placeholder={t.lessonNamePlaceholder} required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={copyLesson} onChange={event => setCopyLesson(event.target.checked)} />{t.copyLesson}</label>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
-              <button type="button" onClick={() => setCreateLessonOpen(false)} style={lnk}>Отмена</button>
-              <button type="submit" style={lnk}>Создать</button>
+              <button type="button" onClick={() => setCreateLessonOpen(false)} style={lnk}>{t.cancel}</button>
+              <button type="submit" style={lnk}>{t.create}</button>
             </div>
           </form>
         </div>}
