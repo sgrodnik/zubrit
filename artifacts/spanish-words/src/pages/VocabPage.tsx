@@ -209,6 +209,7 @@ const LANGUAGES = {
     today: "сегодня",
     daysAgo: "д назад",
     noActivity: "нет активности",
+    revealNextHint: "Пробел / уменьшение громкости: открыть следующую строку",
     lesson: "Урок",
     newLesson: "Новый урок",
     lessonNamePlaceholder: "Название урока",
@@ -264,6 +265,7 @@ const LANGUAGES = {
     today: "today",
     daysAgo: "d ago",
     noActivity: "no activity",
+    revealNextHint: "Space / volume down: reveal the next row",
     lesson: "Lesson",
     newLesson: "New lesson",
     lessonNamePlaceholder: "Lesson name",
@@ -635,6 +637,22 @@ export default function VocabPage() {
     [baseWords, activeFilterLevel]
   );
 
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      const isNextShortcut = event.code === "Space" || event.code === "AudioVolumeDown" || event.key === "AudioVolumeDown" || event.key === "VolumeDown";
+      if (!isNextShortcut || event.repeat || createLessonOpen || lessonDetailsOpen) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, button, summary, a, [contenteditable='true'], [role='button']")) return;
+      const nextWord = displayWords.find(word => !revealed.has(word.russian));
+      if (!nextWord) return;
+      event.preventDefault();
+      setRevealed(previous => new Set(previous).add(nextWord.russian));
+      if (!displayWords.some(word => word.russian !== nextWord.russian && !revealed.has(word.russian))) setAllRevealed(true);
+    };
+    document.addEventListener("keydown", onShortcut);
+    return () => document.removeEventListener("keydown", onShortcut);
+  }, [createLessonOpen, lessonDetailsOpen, displayWords, revealed]);
+
   const updateActiveLesson = (update: (lesson: Lesson) => Lesson, updateTimestamp = true) => {
     setLessonState(state => ({
       ...state,
@@ -899,7 +917,7 @@ export default function VocabPage() {
               <span style={{ color: p.fgVeryMuted }}>
                 {pct}%
               </span>
-              <button data-testid="button-toggle-all" onClick={toggleAll} style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
+              <button data-testid="button-toggle-all" title={t.revealNextHint} onClick={toggleAll} style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
                 {allRevealed ? t.hideAll : t.showAll}
               </button>
             </span>
@@ -1004,9 +1022,9 @@ export default function VocabPage() {
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: settings.fontSize }}>
           <thead>
             <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: p.fgVeryMuted }}>
-              <th style={{ width: "44%", textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{inverted ? secondLanguage : firstLanguage}</th>
-              <th style={{ width: "12%", textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", lineHeight: 1 }}>{t.complexity}</th>
-              <th style={{ width: "44%", textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{inverted ? firstLanguage : secondLanguage}</th>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{inverted ? secondLanguage : firstLanguage}</th>
+              <th title={t.complexity} aria-label={t.complexity} style={{ width: Math.max(32, settings.fontSize * 1.4), textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", lineHeight: 1 }}>#</th>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{inverted ? firstLanguage : secondLanguage}</th>
             </tr>
           </thead>
           <tbody>
