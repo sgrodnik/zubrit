@@ -797,8 +797,8 @@ export default function VocabPage() {
     <>
       <style>{`
         body { background: ${p.bg}; color: ${p.fg}; }
-        .zc { padding: 1.5rem; max-width: ${settings.maxWidth}px; margin: 0 auto; }
-        @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; } }
+        .zc { padding: 1.5rem; padding-bottom: 100vh; max-width: ${settings.maxWidth}px; margin: 0 auto; }
+        @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; padding-bottom: 100vh; } }
         details.zs { interpolate-size: allow-keywords; }
         details.zs > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; }
         details.zs > summary::-webkit-details-marker { display: none; }
