@@ -181,10 +181,10 @@ function loadSettings(): Settings {
       rowSpacing: p.rowSpacing ?? 8,
       randomize: p.randomize ?? false,
       theme,
-      soft: p.soft ?? false,
+      soft: p.soft ?? true,
       maxWidth: p.maxWidth ?? 680,
     };
-  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto", soft: false, maxWidth: 680 }; }
+  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto", soft: true, maxWidth: 680 }; }
 }
 function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
@@ -510,8 +510,15 @@ export default function VocabPage() {
         body { background: ${p.bg}; color: ${p.fg}; }
         .zc { padding: 1.5rem; max-width: ${settings.maxWidth}px; margin: 0 auto; }
         @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; } }
+        details.zs { interpolate-size: allow-keywords; }
         details.zs > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; }
         details.zs > summary::-webkit-details-marker { display: none; }
+        details.zs::details-content {
+          height: 0; opacity: 0; overflow: clip;
+          transition: height 240ms ease, opacity 180ms ease, content-visibility 240ms allow-discrete;
+        }
+        details.zs[open]::details-content { height: auto; opacity: 1; }
+        @media (prefers-reduced-motion: reduce) { details.zs::details-content { transition: none; } }
         .zw { display: flex; }
         @media (max-width: 600px) { .zw { display: none; } }
       `}</style>
@@ -524,7 +531,7 @@ export default function VocabPage() {
             setAllRevealed(false);
             setFilterLevel(0);
           }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
-            {lessonState.lessons.map(lesson => <option key={lesson.id} value={lesson.id}>{lesson.name}</option>)}
+            {[...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt).map((lesson, index) => <option key={lesson.id} value={lesson.id}>{index + 1}. {lesson.name}</option>)}
           </select>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ Новый урок</button>
