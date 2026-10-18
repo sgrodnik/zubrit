@@ -597,7 +597,7 @@ export default function VocabPage() {
             setAllRevealed(false);
             setFilterLevel(0);
           }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
-            {[...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt).map((lesson, index) => <option key={lesson.id} value={lesson.id}>{index + 1}. {lesson.name}</option>)}
+            {[...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt).map((lesson, index, sorted) => <option key={lesson.id} value={lesson.id}>{sorted.length - index}. {lesson.name}</option>)}
           </select>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ Новый урок</button>
