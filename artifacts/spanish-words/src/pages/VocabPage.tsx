@@ -209,7 +209,8 @@ const LANGUAGES = {
     today: "сегодня",
     daysAgo: "д назад",
     noActivity: "нет активности",
-    revealNextHint: "Пробел / уменьшение громкости: открыть следующую строку",
+    revealNextHint: "Пробел: открыть следующую строку",
+    revealNext: "Открыть следующую строку",
     lesson: "Урок",
     newLesson: "Новый урок",
     lessonNamePlaceholder: "Название урока",
@@ -265,7 +266,8 @@ const LANGUAGES = {
     today: "today",
     daysAgo: "d ago",
     noActivity: "no activity",
-    revealNextHint: "Space / volume down: reveal the next row",
+    revealNextHint: "Space: reveal the next row",
+    revealNext: "Reveal the next row",
     lesson: "Lesson",
     newLesson: "New lesson",
     lessonNamePlaceholder: "Lesson name",
@@ -637,21 +639,28 @@ export default function VocabPage() {
     [baseWords, activeFilterLevel]
   );
 
+  const revealNext = useCallback(() => {
+    const nextWord = displayWords.find(word => !revealed.has(word.russian));
+    if (!nextWord) return false;
+    setRevealed(previous => new Set(previous).add(nextWord.russian));
+    if (!displayWords.some(word => word.russian !== nextWord.russian && !revealed.has(word.russian))) setAllRevealed(true);
+    return true;
+  }, [displayWords, revealed]);
+
+  const hasHiddenWords = displayWords.some(word => !revealed.has(word.russian));
+
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
-      const isNextShortcut = event.code === "Space" || event.code === "AudioVolumeDown" || event.key === "AudioVolumeDown" || event.key === "VolumeDown";
-      if (!isNextShortcut || event.repeat || createLessonOpen || lessonDetailsOpen) return;
+      if (event.code !== "Space" || event.repeat || createLessonOpen || lessonDetailsOpen) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, button, summary, a, [contenteditable='true'], [role='button']")) return;
-      const nextWord = displayWords.find(word => !revealed.has(word.russian));
-      if (!nextWord) return;
+      if (!hasHiddenWords) return;
       event.preventDefault();
-      setRevealed(previous => new Set(previous).add(nextWord.russian));
-      if (!displayWords.some(word => word.russian !== nextWord.russian && !revealed.has(word.russian))) setAllRevealed(true);
+      revealNext();
     };
     document.addEventListener("keydown", onShortcut);
     return () => document.removeEventListener("keydown", onShortcut);
-  }, [createLessonOpen, lessonDetailsOpen, displayWords, revealed]);
+  }, [createLessonOpen, lessonDetailsOpen, hasHiddenWords, revealNext]);
 
   const updateActiveLesson = (update: (lesson: Lesson) => Lesson, updateTimestamp = true) => {
     setLessonState(state => ({
@@ -1052,6 +1061,16 @@ export default function VocabPage() {
           </tbody>
         </table>
       </div>
+      {hasHiddenWords && !createLessonOpen && !lessonDetailsOpen && <button
+        type="button"
+        aria-label={t.revealNext}
+        title={`${t.revealNext} (${t.revealNextHint})`}
+        onClick={revealNext}
+        style={{ position: "fixed", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: 52, height: 52, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: 26, lineHeight: 1, cursor: "pointer", transition: "transform 150ms ease" }}
+        onPointerDown={event => { event.currentTarget.style.transform = "scale(0.94)"; }}
+        onPointerUp={event => { event.currentTarget.style.transform = "scale(1)"; }}
+        onPointerLeave={event => { event.currentTarget.style.transform = "scale(1)"; }}
+      >↓</button>}
     </>
   );
 }
