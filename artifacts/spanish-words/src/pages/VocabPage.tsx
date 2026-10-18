@@ -399,9 +399,13 @@ export default function VocabPage() {
     () => Math.max(0, ...baseWords.map(word => word.complexity)),
     [baseWords]
   );
+  const activeFilterLevel = Math.min(filterLevel, maxComplexity);
+  useEffect(() => {
+    if (filterLevel > maxComplexity) setFilterLevel(maxComplexity);
+  }, [filterLevel, maxComplexity]);
   const displayWords = useMemo(
-    () => filterLevel === 0 ? baseWords : baseWords.filter(word => word.complexity >= filterLevel),
-    [baseWords, filterLevel]
+    () => activeFilterLevel === 0 ? baseWords : baseWords.filter(word => word.complexity >= activeFilterLevel),
+    [baseWords, activeFilterLevel]
   );
 
   const updateActiveLesson = (update: (lesson: Lesson) => Lesson, updateTimestamp = true) => {
@@ -647,14 +651,13 @@ export default function VocabPage() {
             </label>
 
             {/* 5. Complexity filter */}
-            {maxComplexity > 0 && (
-              <label style={lbl}>
-                <span style={{ width: 120 }}>{t.complexityFilter}</span>
-                <input data-testid="input-filter" type="range" min={0} max={maxComplexity} step={1} value={filterLevel}
-                  onChange={e => setFilterLevel(+e.target.value)} style={{ flex: 1 }} />
-                <span style={{ width: 36, color: filterLevel > 0 ? p.fg : p.fgVeryMuted }}>{filterLevel}</span>
-              </label>
-            )}
+            <label style={lbl}>
+              <span style={{ width: 120 }}>{t.complexityFilter}</span>
+              <input data-testid="input-filter" type="range" min={0} max={Math.max(1, maxComplexity)} step={1} value={activeFilterLevel}
+                disabled={maxComplexity === 0}
+                onChange={e => setFilterLevel(+e.target.value)} style={{ flex: 1 }} />
+              <span style={{ width: 36, color: activeFilterLevel > 0 ? p.fg : p.fgVeryMuted }}>{activeFilterLevel}</span>
+            </label>
 
           </div>
         </details>
