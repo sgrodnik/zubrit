@@ -4,6 +4,7 @@ interface Word {
   id: number;
   russian: string;
   spanish: string;
+  complexity: number;
 }
 
 const DEFAULT_WORDS_TEXT = [
@@ -27,13 +28,60 @@ const DEFAULT_WORDS_TEXT = [
 const TAPS_KEY = "spanish-vocab-taps-v2";
 const SETTINGS_KEY = "spanish-vocab-settings-v2";
 const WORDS_KEY = "spanish-vocab-words";
+const LESSONS_KEY = "spanish-vocab-lessons-v1";
+const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
+
+type Lesson = { id: string; name: string; wordsText: string; createdAt: number; updatedAt: number };
+type LessonState = { lessons: Lesson[]; activeId: string };
+
+function setLineComplexity(text: string, lineId: number, complexity: number): string {
+  const lines = text.split("\n");
+  const index = lineId - 1;
+  if (index < 0 || index >= lines.length) return text;
+  const content = lines[index].replace(/\t\d+\s*$/, "");
+  lines[index] = complexity > 0 ? `${content}\t${complexity}` : content;
+  return lines.join("\n");
+}
+
+function mergeLegacyTaps(text: string, taps: Record<string, number>): string {
+  return parseWords(text).reduce((result, word) => {
+    const score = taps[word.russian] ?? 0;
+    return score > 0 && word.complexity === 0 ? setLineComplexity(result, word.id, score) : result;
+  }, text);
+}
+
+function loadLessonState(): LessonState {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LESSONS_KEY) ?? "null");
+    if (saved?.lessons?.length) {
+      const lessons: Lesson[] = saved.lessons.map((lesson: any) => ({
+        id: lesson.id,
+        name: lesson.name,
+        wordsText: mergeLegacyTaps(lesson.wordsText ?? "", lesson.taps ?? {}),
+        createdAt: lesson.createdAt ?? Date.now(),
+        updatedAt: lesson.updatedAt ?? Date.now(),
+      }));
+      const activeId = localStorage.getItem(ACTIVE_LESSON_KEY);
+      return { lessons, activeId: lessons.some(lesson => lesson.id === activeId) ? activeId! : lessons[0].id };
+    }
+  } catch { /* migrate legacy storage below */ }
+  const now = Date.now();
+  const lesson: Lesson = {
+    id: `lesson-${now}`,
+    name: "Урок ноль",
+    wordsText: mergeLegacyTaps(localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT, loadTaps()),
+    createdAt: now,
+    updatedAt: now,
+  };
+  return { lessons: [lesson], activeId: lesson.id };
+}
 
 const LANGUAGES = {
   ru: {
     settings: "Настройки",
     hideAll: "скрыть все",
     showAll: "показать все",
-    wordListHint: "Список слов — по одной паре на строку, разделитель Tab или « — »",
+    wordListHint: "Список слов — по одной паре на строку, разделитель Tab или « — »; сложность — третьим полем через Tab",
     theme: "Тема",
     themeDay: "День",
     themeNight: "Ночь",
@@ -57,7 +105,7 @@ const LANGUAGES = {
     settings: "Settings",
     hideAll: "hide all",
     showAll: "show all",
-    wordListHint: "Word list — one pair per line, separator Tab or ' — '",
+    wordListHint: "Word list — one pair per line, separator Tab or ' — '; complexity as a third Tab-separated field",
     theme: "Theme",
     themeDay: "Day",
     themeNight: "Night",
@@ -85,10 +133,6 @@ function loadTaps(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(TAPS_KEY) ?? "{}"); }
   catch { return {}; }
 }
-function saveTaps(t: Record<string, number>) {
-  localStorage.setItem(TAPS_KEY, JSON.stringify(t));
-}
-
 type Theme = "day" | "night" | "auto";
 interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; maxWidth: number; }
 
@@ -109,18 +153,20 @@ function loadSettings(): Settings {
 }
 function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
-function loadWordsText(): string { return localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT; }
-
 function parseWords(text: string): Word[] {
-  return text.split("\n").map(l => l.trim()).filter(Boolean).reduce<Word[]>((acc, line, i) => {
+  return text.split("\n").reduce<Word[]>((acc, rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line) return acc;
+    const content = line.replace(/\t\d+\s*$/, "");
     let parts: string[] = [];
-    if (line.includes("\t")) parts = line.split("\t");
-    else if (line.includes(" — ")) parts = line.split(" — ");
-    else if (line.includes(" - ")) parts = line.split(" - ");
+    if (content.includes("\t")) parts = content.split("\t");
+    else if (content.includes(" — ")) parts = content.split(" — ");
+    else if (content.includes(" - ")) parts = content.split(" - ");
     else return acc;
     const russian = parts[0]?.trim();
     const spanish = parts[1]?.trim();
-    if (russian && spanish) acc.push({ id: i + 1, russian, spanish });
+    const complexity = Number(line.match(/\t(\d+)\s*$/)?.[1] ?? 0);
+    if (russian && spanish) acc.push({ id: index + 1, russian, spanish, complexity });
     return acc;
   }, []);
 }
@@ -231,11 +277,12 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
   return (
     <>
       <button
+        aria-label={`Сложность ${rk}: ${count}`}
         data-testid={`counter-${rk}`}
         onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onClick={onClick}
         style={{ color: p.counterColor(count), fontVariantNumeric: "tabular-nums", background: "none", border: "none", cursor: "pointer", padding: `${rowPadding}px 8px`, fontSize, lineHeight: 1, display: "block", width: "100%", textAlign: "center", userSelect: "none", WebkitUserSelect: "none" }}
       >
-        {count}
+        {count > 0 ? count : ""}
       </button>
       {menu && (
         <>
@@ -261,16 +308,24 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function VocabPage() {
-  const [wordsText, setWordsText] = useState(loadWordsText);
-  const [words, setWords] = useState<Word[]>(() => parseWords(loadWordsText()));
+  const [lessonState, setLessonState] = useState<LessonState>(loadLessonState);
+  const activeLesson = lessonState.lessons.find(lesson => lesson.id === lessonState.activeId) ?? lessonState.lessons[0];
+  const wordsText = activeLesson.wordsText;
+  const words = useMemo(() => parseWords(wordsText), [wordsText]);
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [createLessonOpen, setCreateLessonOpen] = useState(false);
+  const [copyLesson, setCopyLesson] = useState(true);
+  const [newLessonName, setNewLessonName] = useState("");
   const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
     settings.randomize ? shuffle(words) : []
   );
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
-  const [taps, setTaps] = useState<Record<string, number>>(loadTaps);
   const [allRevealed, setAllRevealed] = useState(false);
 
+  useEffect(() => {
+    localStorage.setItem(LESSONS_KEY, JSON.stringify({ lessons: lessonState.lessons }));
+    localStorage.setItem(ACTIVE_LESSON_KEY, lessonState.activeId);
+  }, [lessonState]);
   useEffect(() => { saveSettings(settings); }, [settings]);
 
   // Resolve active theme
@@ -298,22 +353,47 @@ export default function VocabPage() {
     [settings.randomize, shuffledWords, words]
   );
 
+  useEffect(() => {
+    if (settings.randomize) setShuffledWords(shuffle(words));
+  }, [words, settings.randomize]);
+
   // Filter — not persisted, resets on page reload
   const [filterLevel, setFilterLevel] = useState(0);
   const maxComplexity = useMemo(
-    () => Math.max(0, ...baseWords.map(w => taps[w.russian] ?? 0)),
-    [baseWords, taps]
+    () => Math.max(0, ...baseWords.map(word => word.complexity)),
+    [baseWords]
   );
   const displayWords = useMemo(
-    () => filterLevel === 0 ? baseWords : baseWords.filter(w => (taps[w.russian] ?? 0) >= filterLevel),
-    [baseWords, taps, filterLevel]
+    () => filterLevel === 0 ? baseWords : baseWords.filter(word => word.complexity >= filterLevel),
+    [baseWords, filterLevel]
   );
 
-  const applyWordsText = (text: string) => {
-    localStorage.setItem(WORDS_KEY, text);
-    const parsed = parseWords(text);
-    setWords(parsed);
-    if (settings.randomize) setShuffledWords(shuffle(parsed));
+  const updateActiveLesson = (update: (lesson: Lesson) => Lesson) => {
+    setLessonState(state => ({
+      ...state,
+      lessons: state.lessons.map(lesson => lesson.id === state.activeId
+        ? { ...update(lesson), updatedAt: Date.now() }
+        : lesson),
+    }));
+  };
+
+  const createLesson = () => {
+    const name = newLessonName.trim();
+    if (!name) return;
+    const now = Date.now();
+    const lesson: Lesson = {
+      id: `lesson-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      wordsText: copyLesson ? activeLesson.wordsText : "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    setLessonState(state => ({ lessons: [...state.lessons, lesson], activeId: lesson.id }));
+    setNewLessonName("");
+    setCopyLesson(true);
+    setCreateLessonOpen(false);
+    setRevealed(new Set());
+    setFilterLevel(0);
   };
 
   const toggleReveal = useCallback((key: string) => {
@@ -326,10 +406,21 @@ export default function VocabPage() {
     setAllRevealed(a => !a);
   };
 
-  const inc = useCallback((k: string) => setTaps(p => { const n = { ...p, [k]: (p[k] ?? 0) + 1 }; saveTaps(n); return n; }), []);
-  const dec = useCallback((k: string) => setTaps(p => { const n = { ...p, [k]: Math.max(0, (p[k] ?? 0) - 1) }; saveTaps(n); return n; }), []);
-  const reset = useCallback((k: string) => setTaps(p => { const n = { ...p, [k]: 0 }; saveTaps(n); return n; }), []);
-  const resetAll = useCallback(() => { saveTaps({}); setTaps({}); }, []);
+  const changeTap = (lineId: string, change: (value: number) => number) => {
+    const id = Number(lineId);
+    updateActiveLesson(lesson => {
+      const word = parseWords(lesson.wordsText).find(item => item.id === id);
+      if (!word) return lesson;
+      return { ...lesson, wordsText: setLineComplexity(lesson.wordsText, id, Math.max(0, change(word.complexity))) };
+    });
+  };
+  const inc = (key: string) => changeTap(key, value => value + 1);
+  const dec = (key: string) => changeTap(key, value => value - 1);
+  const reset = (key: string) => changeTap(key, () => 0);
+  const resetAll = () => updateActiveLesson(lesson => ({
+    ...lesson,
+    wordsText: parseWords(lesson.wordsText).reduce((text, word) => setLineComplexity(text, word.id, 0), lesson.wordsText),
+  }));
 
   const cell: React.CSSProperties = {
     padding: `${settings.rowSpacing}px 0`,
@@ -362,6 +453,30 @@ export default function VocabPage() {
       `}</style>
 
       <div className="zc">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: "1rem" }}>
+          <select aria-label="Урок" value={activeLesson.id} onChange={event => {
+            setLessonState(state => ({ ...state, activeId: event.target.value }));
+            setRevealed(new Set());
+            setAllRevealed(false);
+            setFilterLevel(0);
+          }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
+            {lessonState.lessons.map(lesson => <option key={lesson.id} value={lesson.id}>{lesson.name}</option>)}
+          </select>
+          <button type="button" onClick={() => { setNewLessonName(copyLesson ? activeLesson.name : ""); setCreateLessonOpen(true); }} style={lnk}>+ Новый урок</button>
+        </div>
+
+        {createLessonOpen && <div role="dialog" aria-modal="true" aria-label="Новый урок" style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
+          <form onSubmit={event => { event.preventDefault(); createLesson(); }} style={{ width: "min(360px, 100%)", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 12 }}>
+            <strong>Новый урок</strong>
+            <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} placeholder="Название урока" required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={copyLesson} onChange={event => { setCopyLesson(event.target.checked); if (!event.target.checked) setNewLessonName(""); else if (!newLessonName) setNewLessonName(activeLesson.name); }} />Скопировать название, слова и сложность текущего урока</label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button type="button" onClick={() => setCreateLessonOpen(false)} style={lnk}>Отмена</button>
+              <button type="submit" style={lnk}>Создать</button>
+            </div>
+          </form>
+        </div>}
+
         {/* Settings spoiler row */}
         <details className="zs" style={{ marginBottom: "1.25rem" }}>
           <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: p.fgMuted }}>
@@ -391,7 +506,7 @@ export default function VocabPage() {
               <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
                 {t.wordListHint}
               </div>
-              <NumberedTextarea value={wordsText} onChange={setWordsText} onBlur={applyWordsText} p={p} maxHeight={220} />
+              <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(lesson => ({ ...lesson, wordsText: text }))} onBlur={() => {}} p={p} maxHeight={220} />
             </div>
 
             {/* 2. Theme */}
@@ -467,13 +582,13 @@ export default function VocabPage() {
           </thead>
           <tbody>
             {displayWords.map(word => {
-              const count = taps[word.russian] ?? 0;
+              const count = word.complexity;
               const isRevealed = revealed.has(word.russian);
               return (
-                <tr key={word.russian} data-testid={`row-word-${word.id}`}>
+                <tr key={word.id} data-testid={`row-word-${word.id}`}>
                   <td style={{ ...cell, paddingRight: "1em", color: p.fg }}>{word.russian}</td>
                   <td style={{ ...cell, textAlign: "center", padding: 0 }}>
-                    <CounterCell rk={word.russian} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
+                    <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
                   </td>
                   <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
                     style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg }}>
