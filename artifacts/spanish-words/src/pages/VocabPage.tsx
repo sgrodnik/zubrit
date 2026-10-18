@@ -50,6 +50,12 @@ function mergeLegacyTaps(text: string, taps: Record<string, number>): string {
   }, text);
 }
 
+function suggestedLessonName(previousName: string): string {
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return `${date} ${previousName}`;
+}
+
 function loadLessonState(): LessonState {
   try {
     const saved = JSON.parse(localStorage.getItem(LESSONS_KEY) ?? "null");
@@ -314,6 +320,7 @@ export default function VocabPage() {
   const words = useMemo(() => parseWords(wordsText), [wordsText]);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [createLessonOpen, setCreateLessonOpen] = useState(false);
+  const [renameLessonOpen, setRenameLessonOpen] = useState(false);
   const [copyLesson, setCopyLesson] = useState(true);
   const [newLessonName, setNewLessonName] = useState("");
   const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
@@ -396,6 +403,26 @@ export default function VocabPage() {
     setFilterLevel(0);
   };
 
+  const renameCurrentLesson = () => {
+    const name = newLessonName.trim();
+    if (!name) return;
+    setLessonState(state => ({
+      ...state,
+      lessons: state.lessons.map(lesson => lesson.id === state.activeId ? { ...lesson, name, updatedAt: Date.now() } : lesson),
+    }));
+    setRenameLessonOpen(false);
+  };
+
+  const deleteCurrentLesson = () => {
+    if (lessonState.lessons.length <= 1 || !window.confirm(`Удалить урок «${activeLesson.name}»?`)) return;
+    const index = lessonState.lessons.findIndex(lesson => lesson.id === activeLesson.id);
+    const remaining = lessonState.lessons.filter(lesson => lesson.id !== activeLesson.id);
+    setLessonState({ lessons: remaining, activeId: remaining[Math.max(0, index - 1)].id });
+    setRevealed(new Set());
+    setAllRevealed(false);
+    setFilterLevel(0);
+  };
+
   const toggleReveal = useCallback((key: string) => {
     setRevealed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }, []);
@@ -462,14 +489,29 @@ export default function VocabPage() {
           }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
             {lessonState.lessons.map(lesson => <option key={lesson.id} value={lesson.id}>{lesson.name}</option>)}
           </select>
-          <button type="button" onClick={() => { setNewLessonName(copyLesson ? activeLesson.name : ""); setCreateLessonOpen(true); }} style={lnk}>+ Новый урок</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ Новый урок</button>
+            <button type="button" onClick={() => { setNewLessonName(activeLesson.name); setRenameLessonOpen(true); }} style={lnk}>Переименовать</button>
+            <button type="button" disabled={lessonState.lessons.length <= 1} onClick={deleteCurrentLesson} style={{ ...lnk, opacity: lessonState.lessons.length <= 1 ? 0.4 : 1 }}>Удалить</button>
+          </div>
         </div>
+
+        {renameLessonOpen && <div role="dialog" aria-modal="true" aria-label="Переименовать урок" style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
+          <form onSubmit={event => { event.preventDefault(); renameCurrentLesson(); }} style={{ width: "min(360px, 100%)", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 12 }}>
+            <strong>Переименовать урок</strong>
+            <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button type="button" onClick={() => setRenameLessonOpen(false)} style={lnk}>Отмена</button>
+              <button type="submit" style={lnk}>Сохранить</button>
+            </div>
+          </form>
+        </div>}
 
         {createLessonOpen && <div role="dialog" aria-modal="true" aria-label="Новый урок" style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
           <form onSubmit={event => { event.preventDefault(); createLesson(); }} style={{ width: "min(360px, 100%)", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 12 }}>
             <strong>Новый урок</strong>
             <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} placeholder="Название урока" required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={copyLesson} onChange={event => { setCopyLesson(event.target.checked); if (!event.target.checked) setNewLessonName(""); else if (!newLessonName) setNewLessonName(activeLesson.name); }} />Скопировать название, слова и сложность текущего урока</label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={copyLesson} onChange={event => setCopyLesson(event.target.checked)} />Скопировать слова и сложность текущего урока</label>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
               <button type="button" onClick={() => setCreateLessonOpen(false)} style={lnk}>Отмена</button>
               <button type="submit" style={lnk}>Создать</button>
