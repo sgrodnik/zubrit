@@ -43,6 +43,23 @@ function setLineComplexity(text: string, lineId: number, complexity: number): st
   return lines.join("\n");
 }
 
+function isInverted(text: string): boolean {
+  return /^\s*#i\s*$/m.test(text);
+}
+
+function setInverted(text: string, inverted: boolean): string {
+  const lines = text.split(/\r?\n/).filter(line => !/^\s*#i\s*$/.test(line));
+  if (inverted) {
+    const languageDirective = lines.findIndex(line => /^\s*#lang\b/i.test(line));
+    lines.splice(languageDirective >= 0 ? languageDirective + 1 : 0, 0, "#i");
+  }
+  return lines.join("\n");
+}
+
+function withoutLessonFlags(text: string): string {
+  return text.split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join("\n");
+}
+
 function mergeLegacyTaps(text: string, taps: Record<string, number>): string {
   return parseWords(text).reduce((result, word) => {
     const score = taps[word.russian] ?? 0;
@@ -60,22 +77,32 @@ function loadLessonState(): LessonState {
   try {
     const saved = JSON.parse(localStorage.getItem(LESSONS_KEY) ?? "null");
     if (saved?.lessons?.length) {
-      const lessons: Lesson[] = saved.lessons.map((lesson: any) => ({
-        id: lesson.id,
-        name: lesson.name,
-        wordsText: mergeLegacyTaps(lesson.wordsText ?? "", lesson.taps ?? {}),
-        createdAt: lesson.createdAt ?? Date.now(),
-        updatedAt: lesson.updatedAt ?? Date.now(),
-      }));
+      let legacyInverted = false;
+      try { legacyInverted = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").reverseTranslation === true; } catch { /* ignore malformed settings */ }
+      const lessons: Lesson[] = saved.lessons.map((lesson: any) => {
+        let wordsText = mergeLegacyTaps(lesson.wordsText ?? "", lesson.taps ?? {});
+        if (legacyInverted && !isInverted(wordsText)) wordsText = setInverted(wordsText, true);
+        return {
+          id: lesson.id,
+          name: lesson.name,
+          wordsText,
+          createdAt: lesson.createdAt ?? Date.now(),
+          updatedAt: lesson.updatedAt ?? Date.now(),
+        };
+      });
       const activeId = localStorage.getItem(ACTIVE_LESSON_KEY);
       return { lessons, activeId: lessons.some(lesson => lesson.id === activeId) ? activeId! : lessons[0].id };
     }
   } catch { /* migrate legacy storage below */ }
   const now = Date.now();
+  let wordsText = mergeLegacyTaps(localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT, loadTaps());
+  try {
+    if (JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").reverseTranslation === true) wordsText = setInverted(wordsText, true);
+  } catch { /* ignore malformed settings */ }
   const lesson: Lesson = {
     id: `lesson-${now}`,
     name: "Урок ноль",
-    wordsText: mergeLegacyTaps(localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT, loadTaps()),
+    wordsText,
     createdAt: now,
     updatedAt: now,
   };
@@ -87,7 +114,7 @@ const LANGUAGES = {
     settings: "Настройки",
     hideAll: "скрыть все",
     showAll: "показать все",
-    wordListHint: "Список слов — по одной паре на строку, разделитель Tab или « — »; сложность — третьим полем через Tab",
+    wordListHint: "Список слов — пара на строку, разделитель Tab или « — »; сложность третьим полем через Tab. #lang Русский Турецкий задаёт заголовки, #i меняет направление",
     theme: "Тема",
     themeDay: "День",
     themeNight: "Ночь",
@@ -97,6 +124,7 @@ const LANGUAGES = {
     rowSpacing: "Интервал строк",
     width: "Ширина",
     randomOrder: "Случайный порядок",
+    reverseTranslation: "Обратный перевод",
     complexityFilter: "Сложность ≥",
     russian: "Русский",
     complexity: "Сложность",
@@ -111,7 +139,7 @@ const LANGUAGES = {
     settings: "Settings",
     hideAll: "hide all",
     showAll: "show all",
-    wordListHint: "Word list — one pair per line, separator Tab or ' — '; complexity as a third Tab-separated field",
+    wordListHint: "Word list — one pair per line; complexity is an optional third Tab-separated field. #lang Russian Turkish sets headers, #i reverses direction",
     theme: "Theme",
     themeDay: "Day",
     themeNight: "Night",
@@ -121,6 +149,7 @@ const LANGUAGES = {
     rowSpacing: "Row spacing",
     width: "Width",
     randomOrder: "Random order",
+    reverseTranslation: "Reverse translation",
     complexityFilter: "Complexity ≥",
     russian: "Russian",
     complexity: "Complexity",
@@ -375,11 +404,11 @@ export default function VocabPage() {
     [baseWords, filterLevel]
   );
 
-  const updateActiveLesson = (update: (lesson: Lesson) => Lesson) => {
+  const updateActiveLesson = (update: (lesson: Lesson) => Lesson, updateTimestamp = true) => {
     setLessonState(state => ({
       ...state,
       lessons: state.lessons.map(lesson => lesson.id === state.activeId
-        ? { ...update(lesson), updatedAt: Date.now() }
+        ? { ...update(lesson), updatedAt: updateTimestamp ? Date.now() : lesson.updatedAt }
         : lesson),
     }));
   };
@@ -466,6 +495,10 @@ export default function VocabPage() {
   const pct = totalCount > 0 ? Math.round((revealedCount / totalCount) * 100) : 0;
 
   const t = LANGUAGES[getLang()];
+  const languagePair = wordsText.match(/^\s*#lang\s+(\S+)\s+(.+?)\s*$/m);
+  const firstLanguage = languagePair?.[1] ?? t.russian;
+  const secondLanguage = languagePair?.[2] ?? t.spanish;
+  const inverted = isInverted(wordsText);
 
   return (
     <>
@@ -548,7 +581,10 @@ export default function VocabPage() {
               <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
                 {t.wordListHint}
               </div>
-              <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(lesson => ({ ...lesson, wordsText: text }))} onBlur={() => {}} p={p} maxHeight={220} />
+              <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(
+                lesson => ({ ...lesson, wordsText: text }),
+                withoutLessonFlags(text) !== withoutLessonFlags(wordsText),
+              )} onBlur={() => {}} p={p} maxHeight={220} />
             </div>
 
             {/* 2. Theme */}
@@ -600,6 +636,16 @@ export default function VocabPage() {
                 onChange={e => handleRandomize(e.target.checked)} />
             </label>
 
+            <label style={lbl}>
+              <span style={{ width: 120 }}>{t.reverseTranslation}</span>
+              <input type="checkbox" checked={isInverted(wordsText)}
+                onChange={event => {
+                  updateActiveLesson(lesson => ({ ...lesson, wordsText: setInverted(lesson.wordsText, event.target.checked) }), false);
+                  setRevealed(new Set());
+                  setAllRevealed(false);
+                }} />
+            </label>
+
             {/* 5. Complexity filter */}
             {maxComplexity > 0 && (
               <label style={lbl}>
@@ -617,9 +663,9 @@ export default function VocabPage() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
           <thead>
             <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: p.fgVeryMuted }}>
-              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{t.russian}</th>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{inverted ? secondLanguage : firstLanguage}</th>
               <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3.5em", lineHeight: 1 }}>{t.complexity}</th>
-              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{t.spanish}</th>
+              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{inverted ? firstLanguage : secondLanguage}</th>
             </tr>
           </thead>
           <tbody>
@@ -628,14 +674,14 @@ export default function VocabPage() {
               const isRevealed = revealed.has(word.russian);
               return (
                 <tr key={word.id} data-testid={`row-word-${word.id}`}>
-                  <td style={{ ...cell, paddingRight: "1em", color: p.fg }}>{word.russian}</td>
+                  <td style={{ ...cell, paddingRight: "1em", color: p.fg }}>{inverted ? word.spanish : word.russian}</td>
                   <td style={{ ...cell, textAlign: "center", padding: 0 }}>
                     <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
                   </td>
                   <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
                     style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg }}>
                     {isRevealed
-                      ? <span>{word.spanish}</span>
+                      ? <span>{inverted ? word.russian : word.spanish}</span>
                       : <span style={{ display: "inline-block", width: "4em", height: "0.6em", background: p.placeholder, borderRadius: 2, verticalAlign: "middle" }} />
                     }
                   </td>
