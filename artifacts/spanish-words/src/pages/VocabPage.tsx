@@ -29,6 +29,7 @@ const SETTINGS_KEY = "spanish-vocab-settings-v2";
 const WORDS_KEY = "spanish-vocab-words";
 const LESSONS_KEY = "spanish-vocab-lessons-v1";
 const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
+const REVEAL_BUTTON_POSITION_KEY = "spanish-vocab-reveal-button-position-v1";
 const BACKUP_FORMAT = "spanish-words-backup";
 const BACKUP_VERSION = 1;
 const IDLE_TIMEOUT_MS = 10_000;
@@ -211,6 +212,7 @@ const LANGUAGES = {
     noActivity: "нет активности",
     revealNextHint: "Пробел: открыть следующую строку",
     revealNext: "Открыть следующую строку",
+    dragToMove: "Перетащите, чтобы переместить",
     lesson: "Урок",
     newLesson: "Новый урок",
     lessonNamePlaceholder: "Название урока",
@@ -268,6 +270,7 @@ const LANGUAGES = {
     noActivity: "no activity",
     revealNextHint: "Space: reveal the next row",
     revealNext: "Reveal the next row",
+    dragToMove: "Drag to move",
     lesson: "Lesson",
     newLesson: "New lesson",
     lessonNamePlaceholder: "Lesson name",
@@ -491,6 +494,14 @@ export default function VocabPage() {
   );
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [allRevealed, setAllRevealed] = useState(false);
+  const [revealButtonPosition, setRevealButtonPosition] = useState<{ left: number; top: number } | null>(() => {
+    try {
+      const position = JSON.parse(localStorage.getItem(REVEAL_BUTTON_POSITION_KEY) ?? "null");
+      return Number.isFinite(position?.left) && Number.isFinite(position?.top) ? position : null;
+    } catch { return null; }
+  });
+  const revealButtonDragRef = useRef<{ pointerId: number; startX: number; startY: number; left: number; top: number; moved: boolean } | null>(null);
+  const suppressRevealButtonClickRef = useRef(false);
 
   const accrueStudyTime = useCallback((now: number) => {
     const tracker = activityRef.current;
@@ -648,6 +659,53 @@ export default function VocabPage() {
   }, [displayWords, revealed]);
 
   const hasHiddenWords = displayWords.some(word => !revealed.has(word.russian));
+
+  useEffect(() => {
+    const clampPosition = () => setRevealButtonPosition(position => position ? {
+      left: Math.max(0, Math.min(position.left, window.innerWidth - 52)),
+      top: Math.max(0, Math.min(position.top, window.innerHeight - 52)),
+    } : null);
+    window.addEventListener("resize", clampPosition);
+    return () => window.removeEventListener("resize", clampPosition);
+  }, []);
+
+  const startRevealButtonDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    revealButtonDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveRevealButton = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = revealButtonDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(deltaX, deltaY) < 5) return;
+    drag.moved = true;
+    setRevealButtonPosition({
+      left: Math.max(0, Math.min(drag.left + deltaX, window.innerWidth - 52)),
+      top: Math.max(0, Math.min(drag.top + deltaY, window.innerHeight - 52)),
+    });
+  };
+
+  const finishRevealButtonDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = revealButtonDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.moved) {
+      if (event.type === "pointerup") {
+        suppressRevealButtonClickRef.current = true;
+        window.setTimeout(() => { suppressRevealButtonClickRef.current = false; }, 500);
+      }
+      const position = {
+        left: Math.max(0, Math.min(drag.left + event.clientX - drag.startX, window.innerWidth - 52)),
+        top: Math.max(0, Math.min(drag.top + event.clientY - drag.startY, window.innerHeight - 52)),
+      };
+      setRevealButtonPosition(position);
+      try { localStorage.setItem(REVEAL_BUTTON_POSITION_KEY, JSON.stringify(position)); } catch { /* position is still available for this session */ }
+    }
+    revealButtonDragRef.current = null;
+  };
 
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
@@ -1064,12 +1122,20 @@ export default function VocabPage() {
       {hasHiddenWords && !createLessonOpen && !lessonDetailsOpen && <button
         type="button"
         aria-label={t.revealNext}
-        title={`${t.revealNext} (${t.revealNextHint})`}
-        onClick={revealNext}
-        style={{ position: "fixed", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: 52, height: 52, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: 26, lineHeight: 1, cursor: "pointer", transition: "transform 150ms ease" }}
-        onPointerDown={event => { event.currentTarget.style.transform = "scale(0.94)"; }}
-        onPointerUp={event => { event.currentTarget.style.transform = "scale(1)"; }}
-        onPointerLeave={event => { event.currentTarget.style.transform = "scale(1)"; }}
+        title={`${t.revealNext} · ${t.revealNextHint} · ${t.dragToMove}`}
+        onClick={event => {
+          if (suppressRevealButtonClickRef.current) {
+            suppressRevealButtonClickRef.current = false;
+            event.preventDefault();
+            return;
+          }
+          revealNext();
+        }}
+        onPointerDown={startRevealButtonDrag}
+        onPointerMove={moveRevealButton}
+        onPointerUp={finishRevealButtonDrag}
+        onPointerCancel={finishRevealButtonDrag}
+        style={{ position: "fixed", left: revealButtonPosition ? `${revealButtonPosition.left}px` : undefined, top: revealButtonPosition ? `${revealButtonPosition.top}px` : undefined, right: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-right, 0px))", bottom: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: 52, height: 52, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: 26, lineHeight: 1, cursor: "grab", touchAction: "none", userSelect: "none", transition: "transform 150ms ease" }}
       >↓</button>}
     </>
   );
