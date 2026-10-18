@@ -30,6 +30,8 @@ const SETTINGS_KEY = "spanish-vocab-settings-v2";
 const WORDS_KEY = "spanish-vocab-words";
 const LESSONS_KEY = "spanish-vocab-lessons-v1";
 const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
+const BACKUP_FORMAT = "spanish-words-backup";
+const BACKUP_VERSION = 1;
 
 type Lesson = { id: string; name: string; wordsText: string; createdAt: number; updatedAt: number };
 type LessonState = { lessons: Lesson[]; activeId: string };
@@ -134,6 +136,8 @@ const LANGUAGES = {
     yes: "да",
     no: "нет",
     resetAll: "Сбросить все",
+    exportData: "Экспорт данных",
+    importData: "Импорт данных",
   },
   en: {
     settings: "Settings",
@@ -159,6 +163,8 @@ const LANGUAGES = {
     yes: "yes",
     no: "no",
     resetAll: "Reset all",
+    exportData: "Export data",
+    importData: "Import data",
   }
 };
 
@@ -171,20 +177,23 @@ function loadTaps(): Record<string, number> {
 type Theme = "day" | "night" | "auto";
 interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; maxWidth: number; }
 
+function normalizeSettings(value: any): Settings {
+  const p = value && typeof value === "object" ? value : {};
+  const raw = p.theme;
+  const theme: Theme = raw === "day" || raw === "night" || raw === "auto" ? raw : "auto";
+  return {
+    fontSize: Number.isFinite(p.fontSize) ? p.fontSize : 14,
+    rowSpacing: Number.isFinite(p.rowSpacing) ? p.rowSpacing : 8,
+    randomize: typeof p.randomize === "boolean" ? p.randomize : false,
+    theme,
+    soft: typeof p.soft === "boolean" ? p.soft : true,
+    maxWidth: Number.isFinite(p.maxWidth) ? p.maxWidth : 680,
+  };
+}
+
 function loadSettings(): Settings {
-  try {
-    const p = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
-    const raw = p.theme;
-    const theme: Theme = raw === "day" || raw === "night" || raw === "auto" ? raw : "auto";
-    return {
-      fontSize: p.fontSize ?? 14,
-      rowSpacing: p.rowSpacing ?? 8,
-      randomize: p.randomize ?? false,
-      theme,
-      soft: p.soft ?? true,
-      maxWidth: p.maxWidth ?? 680,
-    };
-  } catch { return { fontSize: 14, rowSpacing: 8, randomize: false, theme: "auto", soft: true, maxWidth: 680 }; }
+  try { return normalizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}")); }
+  catch { return normalizeSettings(null); }
 }
 function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
@@ -352,6 +361,7 @@ export default function VocabPage() {
   const [renameLessonOpen, setRenameLessonOpen] = useState(false);
   const [copyLesson, setCopyLesson] = useState(true);
   const [newLessonName, setNewLessonName] = useState("");
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
     settings.randomize ? shuffle(words) : []
   );
@@ -482,6 +492,62 @@ export default function VocabPage() {
     wordsText: parseWords(lesson.wordsText).reduce((text, word) => setLineComplexity(text, word.id, 0), lesson.wordsText),
   }));
 
+  const exportData = () => {
+    const backup = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      lessons: lessonState.lessons,
+      activeLessonId: lessonState.activeId,
+      settings,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `spanish-words-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const importData = async (file: File) => {
+    try {
+      const backup = JSON.parse(await file.text());
+      if (backup?.format !== BACKUP_FORMAT || backup?.version !== BACKUP_VERSION || !Array.isArray(backup.lessons) || backup.lessons.length === 0) {
+        throw new Error("Неподдерживаемый формат файла или нет уроков");
+      }
+      const now = Date.now();
+      const ids = new Set<string>();
+      const lessons: Lesson[] = backup.lessons.map((item: any, index: number) => {
+        if (!item || typeof item.name !== "string" || !item.name.trim() || typeof item.wordsText !== "string") {
+          throw new Error(`Некорректные данные урока №${index + 1}`);
+        }
+        let id = typeof item.id === "string" && item.id ? item.id : `import-${now}-${index}`;
+        while (ids.has(id)) id = `${id}-${index + 1}`;
+        ids.add(id);
+        return {
+          id,
+          name: item.name,
+          wordsText: item.wordsText,
+          createdAt: Number.isFinite(item.createdAt) ? item.createdAt : now,
+          updatedAt: Number.isFinite(item.updatedAt) ? item.updatedAt : now,
+        };
+      });
+      if (!window.confirm("Импорт заменит все текущие уроки и настройки. Продолжить?")) return;
+      const activeId = lessons.some(lesson => lesson.id === backup.activeLessonId) ? backup.activeLessonId : lessons[0].id;
+      setLessonState({ lessons, activeId });
+      setSettings(normalizeSettings(backup.settings));
+      setRevealed(new Set());
+      setAllRevealed(false);
+      setFilterLevel(0);
+      window.alert("Данные импортированы");
+    } catch (error) {
+      window.alert(error instanceof Error ? `Не удалось импортировать файл: ${error.message}` : "Не удалось импортировать файл");
+    }
+  };
+
   const cell: React.CSSProperties = {
     padding: `${settings.rowSpacing}px 0`,
     verticalAlign: "middle",
@@ -567,10 +633,7 @@ export default function VocabPage() {
         <details className="zs" style={{ marginBottom: "1.25rem" }}>
           <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: p.fgMuted }}>
             {/* Left: label + triangle */}
-            <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-              <span style={{ fontSize: 10 }}>▶</span>
-              <span>{t.settings}</span>
-            </span>
+            <span>{t.settings}</span>
             {/* Right: controls — stop propagation so they don't toggle details */}
             <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }} onClick={e => e.preventDefault()}>
               <span style={{ color: p.fgVeryMuted }}>
@@ -665,6 +728,17 @@ export default function VocabPage() {
                 onChange={e => setFilterLevel(+e.target.value)} style={{ flex: 1 }} />
               <span style={{ width: 36, color: activeFilterLevel > 0 ? p.fg : p.fgVeryMuted }}>{activeFilterLevel}</span>
             </label>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16, paddingTop: 4 }}>
+              <button type="button" onClick={exportData} style={lnk}>{t.exportData}</button>
+              <button type="button" onClick={() => importInputRef.current?.click()} style={lnk}>{t.importData}</button>
+              <input ref={importInputRef} type="file" accept=".json,application/json" hidden onChange={event => {
+                const input = event.currentTarget;
+                const file = input.files?.[0];
+                input.value = "";
+                if (file) void importData(file);
+              }} />
+            </div>
 
           </div>
         </details>
