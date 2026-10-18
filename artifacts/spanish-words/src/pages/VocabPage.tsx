@@ -809,6 +809,13 @@ export default function VocabPage() {
         details.zs[open]::details-content { height: auto; opacity: 1; }
         @media (prefers-reduced-motion: reduce) { details.zs::details-content { transition: none; } }
         .zw { display: flex; }
+        .answer-reveal { position: relative; display: grid; grid-template-rows: 0fr; min-height: 0.6em; transition: grid-template-rows 180ms ease; }
+        .answer-reveal.is-open { grid-template-rows: 1fr; }
+        .answer-reveal__content { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-2px); transition: opacity 150ms ease, transform 180ms ease; }
+        .answer-reveal.is-open .answer-reveal__content { opacity: 1; transform: translateY(0); }
+        .answer-reveal__placeholder { position: absolute; left: 0; top: 50%; width: 4em; height: 0.6em; transform: translateY(-50%); transition: opacity 120ms ease; }
+        .answer-reveal.is-open .answer-reveal__placeholder { opacity: 0; }
+        @media (prefers-reduced-motion: reduce) { .answer-reveal, .answer-reveal__content, .answer-reveal__placeholder { transition: none; } }
         @media (max-width: 600px) { .zw { display: none; } }
       `}</style>
 
@@ -994,12 +1001,12 @@ export default function VocabPage() {
         </details>
 
         {/* Table */}
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: settings.fontSize }}>
+        <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: settings.fontSize }}>
           <thead>
             <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: p.fgVeryMuted }}>
-              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{inverted ? secondLanguage : firstLanguage}</th>
-              <th style={{ textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", width: "3.5em", lineHeight: 1 }}>{t.complexity}</th>
-              <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{inverted ? firstLanguage : secondLanguage}</th>
+              <th style={{ width: "44%", textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{inverted ? secondLanguage : firstLanguage}</th>
+              <th style={{ width: "12%", textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", lineHeight: 1 }}>{t.complexity}</th>
+              <th style={{ width: "44%", textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{inverted ? firstLanguage : secondLanguage}</th>
             </tr>
           </thead>
           <tbody>
@@ -1008,16 +1015,18 @@ export default function VocabPage() {
               const isRevealed = revealed.has(word.russian);
               return (
                 <tr key={word.id} data-testid={`row-word-${word.id}`}>
-                  <td style={{ ...cell, paddingRight: "1em", color: p.fg }}>{inverted ? word.spanish : word.russian}</td>
+                  <td style={{ ...cell, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>{inverted ? word.spanish : word.russian}</td>
                   <td style={{ ...cell, textAlign: "center", padding: 0 }}>
                     <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
                   </td>
                   <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
-                    style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg }}>
-                    {isRevealed
-                      ? <span>{inverted ? word.russian : word.spanish}</span>
-                      : <span style={{ display: "inline-block", width: "4em", height: "0.6em", background: p.placeholder, borderRadius: 2, verticalAlign: "middle" }} />
-                    }
+                    style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg, overflowWrap: "anywhere" }}>
+                    <div className={`answer-reveal${isRevealed ? " is-open" : ""}`}>
+                      <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />
+                      <span className="answer-reveal__content" aria-hidden={!isRevealed}>
+                        {inverted ? word.russian : word.spanish}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               );
