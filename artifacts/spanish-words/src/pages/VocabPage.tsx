@@ -30,6 +30,7 @@ const WORDS_KEY = "spanish-vocab-words";
 const LESSONS_KEY = "spanish-vocab-lessons-v1";
 const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
 const REVEAL_BUTTON_POSITION_KEY = "spanish-vocab-reveal-button-position-v1";
+const REVEAL_BUTTON_SIZE = 104;
 const BACKUP_FORMAT = "spanish-words-backup";
 const BACKUP_VERSION = 1;
 const IDLE_TIMEOUT_MS = 10_000;
@@ -662,9 +663,10 @@ export default function VocabPage() {
 
   useEffect(() => {
     const clampPosition = () => setRevealButtonPosition(position => position ? {
-      left: Math.max(0, Math.min(position.left, window.innerWidth - 52)),
-      top: Math.max(0, Math.min(position.top, window.innerHeight - 52)),
+      left: Math.max(0, Math.min(position.left, window.innerWidth - REVEAL_BUTTON_SIZE)),
+      top: Math.max(0, Math.min(position.top, window.innerHeight - REVEAL_BUTTON_SIZE)),
     } : null);
+    clampPosition();
     window.addEventListener("resize", clampPosition);
     return () => window.removeEventListener("resize", clampPosition);
   }, []);
@@ -684,8 +686,8 @@ export default function VocabPage() {
     if (!drag.moved && Math.hypot(deltaX, deltaY) < 5) return;
     drag.moved = true;
     setRevealButtonPosition({
-      left: Math.max(0, Math.min(drag.left + deltaX, window.innerWidth - 52)),
-      top: Math.max(0, Math.min(drag.top + deltaY, window.innerHeight - 52)),
+      left: Math.max(0, Math.min(drag.left + deltaX, window.innerWidth - REVEAL_BUTTON_SIZE)),
+      top: Math.max(0, Math.min(drag.top + deltaY, window.innerHeight - REVEAL_BUTTON_SIZE)),
     });
   };
 
@@ -698,8 +700,8 @@ export default function VocabPage() {
         window.setTimeout(() => { suppressRevealButtonClickRef.current = false; }, 500);
       }
       const position = {
-        left: Math.max(0, Math.min(drag.left + event.clientX - drag.startX, window.innerWidth - 52)),
-        top: Math.max(0, Math.min(drag.top + event.clientY - drag.startY, window.innerHeight - 52)),
+        left: Math.max(0, Math.min(drag.left + event.clientX - drag.startX, window.innerWidth - REVEAL_BUTTON_SIZE)),
+        top: Math.max(0, Math.min(drag.top + event.clientY - drag.startY, window.innerHeight - REVEAL_BUTTON_SIZE)),
       };
       setRevealButtonPosition(position);
       try { localStorage.setItem(REVEAL_BUTTON_POSITION_KEY, JSON.stringify(position)); } catch { /* position is still available for this session */ }
@@ -1135,7 +1137,7 @@ export default function VocabPage() {
         onPointerMove={moveRevealButton}
         onPointerUp={finishRevealButtonDrag}
         onPointerCancel={finishRevealButtonDrag}
-        style={{ position: "fixed", left: revealButtonPosition ? `${revealButtonPosition.left}px` : undefined, top: revealButtonPosition ? `${revealButtonPosition.top}px` : undefined, right: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-right, 0px))", bottom: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: 52, height: 52, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: 26, lineHeight: 1, cursor: "grab", touchAction: "none", userSelect: "none", transition: "transform 150ms ease" }}
+        style={{ position: "fixed", left: revealButtonPosition ? `${revealButtonPosition.left}px` : undefined, top: revealButtonPosition ? `${revealButtonPosition.top}px` : undefined, right: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-right, 0px))", bottom: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: REVEAL_BUTTON_SIZE, height: REVEAL_BUTTON_SIZE, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: 52, lineHeight: 1, cursor: "grab", touchAction: "none", userSelect: "none", transition: "transform 150ms ease" }}
       >↓</button>}
     </>
   );
