@@ -32,8 +32,9 @@ const LESSONS_KEY = "spanish-vocab-lessons-v1";
 const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
 const BACKUP_FORMAT = "spanish-words-backup";
 const BACKUP_VERSION = 1;
+const IDLE_TIMEOUT_MS = 10_000;
 
-type Lesson = { id: string; name: string; wordsText: string; createdAt: number; updatedAt: number };
+type Lesson = { id: string; name: string; wordsText: string; createdAt: number; updatedAt: number; studySecondsByDate: Record<string, number> };
 type LessonState = { lessons: Lesson[]; activeId: string };
 
 function setLineComplexity(text: string, lineId: number, complexity: number): string {
@@ -69,6 +70,60 @@ function mergeLegacyTaps(text: string, taps: Record<string, number>): string {
   }, text);
 }
 
+function studyDateKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  if (date.getHours() < 4) date.setDate(date.getDate() - 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function splitStudyInterval(start: number, end: number): Array<{ date: string; milliseconds: number }> {
+  const intervals: Array<{ date: string; milliseconds: number }> = [];
+  let cursor = start;
+  while (cursor < end) {
+    const nextBoundary = new Date(cursor);
+    nextBoundary.setHours(4, 0, 0, 0);
+    if (nextBoundary.getTime() <= cursor) nextBoundary.setDate(nextBoundary.getDate() + 1);
+    const segmentEnd = Math.min(end, nextBoundary.getTime());
+    intervals.push({ date: studyDateKey(cursor), milliseconds: segmentEnd - cursor });
+    cursor = segmentEnd;
+  }
+  return intervals;
+}
+
+function normalizeStudySeconds(value: any): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([date, seconds]) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(seconds) && (seconds as number) > 0
+  )) as Record<string, number>;
+}
+
+function formatStudyDate(dateKey: string, locale: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day, 12).toLocaleDateString(locale);
+}
+
+function formatDateTime(timestamp: number, locale: string): string {
+  return new Date(timestamp).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function daysBetweenDateKeys(earlier: string, later: string): number {
+  const parse = (key: string) => key.split("-").map(Number);
+  const [ey, em, ed] = parse(earlier);
+  const [ly, lm, ld] = parse(later);
+  return Math.max(0, Math.round((Date.UTC(ly, lm - 1, ld) - Date.UTC(ey, em - 1, ed)) / 86_400_000));
+}
+
+function lessonStudySummary(lesson: Lesson, today: string, t: { minutesShort: string; noActivity: string; today: string; daysAgo: string }): string {
+  const entries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > 0);
+  const totalSeconds = entries.reduce((total, [, seconds]) => total + seconds, 0);
+  if (entries.length === 0) return `0 ${t.minutesShort} · ${t.noActivity}`;
+  const dates = entries.map(([date]) => date).sort();
+  const lastDate = dates[dates.length - 1];
+  const days = daysBetweenDateKeys(lastDate, today);
+  const recency = days === 0 ? t.today : `${days}${t.daysAgo}`;
+  return `${Math.round(totalSeconds / 60)} ${t.minutesShort} · ${recency}`;
+}
+
 function suggestedLessonName(previousName: string): string {
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -90,6 +145,7 @@ function loadLessonState(): LessonState {
           wordsText,
           createdAt: lesson.createdAt ?? Date.now(),
           updatedAt: lesson.updatedAt ?? Date.now(),
+          studySecondsByDate: normalizeStudySeconds(lesson.studySecondsByDate),
         };
       });
       const activeId = localStorage.getItem(ACTIVE_LESSON_KEY);
@@ -107,6 +163,7 @@ function loadLessonState(): LessonState {
     wordsText,
     createdAt: now,
     updatedAt: now,
+    studySecondsByDate: {},
   };
   return { lessons: [lesson], activeId: lesson.id };
 }
@@ -138,6 +195,21 @@ const LANGUAGES = {
     resetAll: "Сбросить все",
     exportData: "Экспорт данных",
     importData: "Импорт данных",
+    lessonDetails: "Детали урока",
+    details: "Детали",
+    deleteLesson: "Удалить",
+    lessonName: "Название",
+    created: "Создан",
+    updated: "Изменён",
+    date: "Дата",
+    duration: "Длительность",
+    noStudyTime: "Пока нет учтённого времени",
+    minutesShort: "мин",
+    save: "Сохранить",
+    close: "Закрыть",
+    today: "сегодня",
+    daysAgo: "д назад",
+    noActivity: "нет активности",
   },
   en: {
     settings: "Settings",
@@ -165,6 +237,21 @@ const LANGUAGES = {
     resetAll: "Reset all",
     exportData: "Export data",
     importData: "Import data",
+    lessonDetails: "Lesson details",
+    details: "Details",
+    deleteLesson: "Delete",
+    lessonName: "Name",
+    created: "Created",
+    updated: "Edited",
+    date: "Date",
+    duration: "Duration",
+    noStudyTime: "No study time recorded yet",
+    minutesShort: "min",
+    save: "Save",
+    close: "Close",
+    today: "today",
+    daysAgo: "d ago",
+    noActivity: "no activity",
   }
 };
 
@@ -358,21 +445,125 @@ export default function VocabPage() {
   const words = useMemo(() => parseWords(wordsText), [wordsText]);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [createLessonOpen, setCreateLessonOpen] = useState(false);
-  const [renameLessonOpen, setRenameLessonOpen] = useState(false);
+  const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
   const [copyLesson, setCopyLesson] = useState(true);
   const [newLessonName, setNewLessonName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
+  const studyRemaindersRef = useRef<Record<string, number>>({});
+  const activityRef = useRef({
+    lessonId: lessonState.activeId,
+    lastActivityAt: 0,
+    accountedUntil: Date.now(),
+    visible: typeof document === "undefined" || document.visibilityState === "visible",
+  });
   const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
     settings.randomize ? shuffle(words) : []
   );
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [allRevealed, setAllRevealed] = useState(false);
 
+  const accrueStudyTime = useCallback((now: number) => {
+    const tracker = activityRef.current;
+    const lessonId = tracker.lessonId;
+    const additions: Record<string, number> = {};
+    if (tracker.visible && tracker.lastActivityAt > 0) {
+      const from = Math.max(tracker.accountedUntil, tracker.lastActivityAt);
+      const until = Math.min(now, tracker.lastActivityAt + IDLE_TIMEOUT_MS);
+      if (until > from) {
+        for (const segment of splitStudyInterval(from, until)) {
+          const remainderKey = `${lessonId}|${segment.date}`;
+          const totalMs = (studyRemaindersRef.current[remainderKey] ?? 0) + segment.milliseconds;
+          const seconds = Math.floor(totalMs / 1000);
+          studyRemaindersRef.current[remainderKey] = totalMs - seconds * 1000;
+          if (seconds > 0) additions[segment.date] = (additions[segment.date] ?? 0) + seconds;
+        }
+      }
+    }
+    tracker.accountedUntil = Math.max(tracker.accountedUntil, now);
+    if (Object.keys(additions).length > 0) {
+      setLessonState(state => ({
+        ...state,
+        lessons: state.lessons.map(lesson => lesson.id === lessonId
+          ? { ...lesson, studySecondsByDate: { ...(lesson.studySecondsByDate ?? {}), ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (lesson.studySecondsByDate?.[date] ?? 0) + seconds])) } }
+          : lesson),
+      }));
+    }
+  }, []);
+
+  const recordActivity = useCallback(() => {
+    const tracker = activityRef.current;
+    if (!tracker.visible || document.visibilityState !== "visible") return;
+    const now = Date.now();
+    accrueStudyTime(now);
+    tracker.lastActivityAt = now;
+    tracker.accountedUntil = now;
+  }, [accrueStudyTime]);
+
   useEffect(() => {
     localStorage.setItem(LESSONS_KEY, JSON.stringify({ lessons: lessonState.lessons }));
     localStorage.setItem(ACTIVE_LESSON_KEY, lessonState.activeId);
   }, [lessonState]);
   useEffect(() => { saveSettings(settings); }, [settings]);
+
+  useEffect(() => {
+    const tick = () => accrueStudyTime(Date.now());
+    const onVisibilityChange = () => {
+      const tracker = activityRef.current;
+      const now = Date.now();
+      if (document.visibilityState === "hidden") {
+        accrueStudyTime(now);
+        tracker.visible = false;
+        tracker.lastActivityAt = 0;
+        tracker.accountedUntil = now;
+      } else {
+        tracker.visible = true;
+        tracker.lastActivityAt = 0;
+        tracker.accountedUntil = now;
+      }
+    };
+    const onPageHide = () => {
+      const tracker = activityRef.current;
+      accrueStudyTime(Date.now());
+      tracker.visible = false;
+      tracker.lastActivityAt = 0;
+    };
+    const onPageShow = () => {
+      const tracker = activityRef.current;
+      tracker.visible = document.visibilityState === "visible";
+      tracker.lastActivityAt = 0;
+      tracker.accountedUntil = Date.now();
+    };
+    document.addEventListener("pointermove", recordActivity, { passive: true });
+    document.addEventListener("pointerdown", recordActivity, { passive: true });
+    document.addEventListener("scroll", recordActivity, { passive: true, capture: true });
+    document.addEventListener("keydown", recordActivity);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    const interval = window.setInterval(tick, 1000);
+    return () => {
+      accrueStudyTime(Date.now());
+      window.clearInterval(interval);
+      document.removeEventListener("pointermove", recordActivity);
+      document.removeEventListener("pointerdown", recordActivity);
+      document.removeEventListener("scroll", recordActivity, true);
+      document.removeEventListener("keydown", recordActivity);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [accrueStudyTime, recordActivity]);
+
+  useEffect(() => {
+    const tracker = activityRef.current;
+    if (tracker.lessonId === activeLesson.id) return;
+    const now = Date.now();
+    const wasActive = tracker.visible && tracker.lastActivityAt > 0 && now - tracker.lastActivityAt <= IDLE_TIMEOUT_MS;
+    accrueStudyTime(now);
+    tracker.lessonId = activeLesson.id;
+    tracker.accountedUntil = now;
+    tracker.lastActivityAt = wasActive ? now : 0;
+  }, [activeLesson.id, accrueStudyTime]);
 
   // Resolve active theme
   const [systemDark, setSystemDark] = useState(() =>
@@ -437,6 +628,7 @@ export default function VocabPage() {
       wordsText: copyLesson ? activeLesson.wordsText : "",
       createdAt: now,
       updatedAt: now,
+      studySecondsByDate: {},
     };
     setLessonState(state => ({ lessons: [...state.lessons, lesson], activeId: lesson.id }));
     setNewLessonName("");
@@ -446,14 +638,16 @@ export default function VocabPage() {
     setFilterLevel(0);
   };
 
-  const renameCurrentLesson = () => {
+  const saveLessonName = () => {
     const name = newLessonName.trim();
     if (!name) return;
-    setLessonState(state => ({
-      ...state,
-      lessons: state.lessons.map(lesson => lesson.id === state.activeId ? { ...lesson, name, updatedAt: Date.now() } : lesson),
-    }));
-    setRenameLessonOpen(false);
+    if (name !== activeLesson.name) {
+      setLessonState(state => ({
+        ...state,
+        lessons: state.lessons.map(lesson => lesson.id === state.activeId ? { ...lesson, name, updatedAt: Date.now() } : lesson),
+      }));
+    }
+    setNewLessonName(name);
   };
 
   const deleteCurrentLesson = () => {
@@ -461,6 +655,7 @@ export default function VocabPage() {
     const index = lessonState.lessons.findIndex(lesson => lesson.id === activeLesson.id);
     const remaining = lessonState.lessons.filter(lesson => lesson.id !== activeLesson.id);
     setLessonState({ lessons: remaining, activeId: remaining[Math.max(0, index - 1)].id });
+    setLessonDetailsOpen(false);
     setRevealed(new Set());
     setAllRevealed(false);
     setFilterLevel(0);
@@ -533,6 +728,7 @@ export default function VocabPage() {
           wordsText: item.wordsText,
           createdAt: Number.isFinite(item.createdAt) ? item.createdAt : now,
           updatedAt: Number.isFinite(item.updatedAt) ? item.updatedAt : now,
+          studySecondsByDate: normalizeStudySeconds(item.studySecondsByDate),
         };
       });
       if (!window.confirm("Импорт заменит все текущие уроки и настройки. Продолжить?")) return;
@@ -569,6 +765,8 @@ export default function VocabPage() {
   const firstLanguage = languagePair?.[1] ?? t.russian;
   const secondLanguage = languagePair?.[2] ?? t.spanish;
   const inverted = isInverted(wordsText);
+  const todayStudyDate = studyDateKey(Date.now());
+  const sortedLessons = [...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt);
 
   return (
     <>
@@ -597,22 +795,49 @@ export default function VocabPage() {
             setAllRevealed(false);
             setFilterLevel(0);
           }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
-            {[...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt).map((lesson, index, sorted) => <option key={lesson.id} value={lesson.id}>{sorted.length - index}. {lesson.name}</option>)}
+            {sortedLessons.map((lesson, index) => <option key={lesson.id} value={lesson.id}>{sortedLessons.length - index}. {lesson.name} — {lessonStudySummary(lesson, todayStudyDate, t)}</option>)}
           </select>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ Новый урок</button>
-            <button type="button" onClick={() => { setNewLessonName(activeLesson.name); setRenameLessonOpen(true); }} style={lnk}>Переименовать</button>
-            <button type="button" disabled={lessonState.lessons.length <= 1} onClick={deleteCurrentLesson} style={{ ...lnk, opacity: lessonState.lessons.length <= 1 ? 0.4 : 1 }}>Удалить</button>
+            <button type="button" onClick={() => { setNewLessonName(activeLesson.name); setLessonDetailsOpen(true); }} style={lnk}>{t.details}</button>
           </div>
         </div>
 
-        {renameLessonOpen && <div role="dialog" aria-modal="true" aria-label="Переименовать урок" style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
-          <form onSubmit={event => { event.preventDefault(); renameCurrentLesson(); }} style={{ width: "min(360px, 100%)", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 12 }}>
-            <strong>Переименовать урок</strong>
-            <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
-              <button type="button" onClick={() => setRenameLessonOpen(false)} style={lnk}>Отмена</button>
-              <button type="submit" style={lnk}>Сохранить</button>
+        {lessonDetailsOpen && <div role="dialog" aria-modal="true" aria-label={t.lessonDetails} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
+          <form onSubmit={event => { event.preventDefault(); saveLessonName(); }} style={{ width: "min(480px, 100%)", maxHeight: "85vh", overflowY: "auto", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 14 }}>
+            <strong>{t.lessonDetails}</strong>
+            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ color: p.fgMuted }}>{t.lessonName}</span>
+              <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 12px", fontSize: 13 }}>
+              <span style={{ color: p.fgMuted }}>{t.created}:</span><span>{formatDateTime(activeLesson.createdAt, getLang() === "ru" ? "ru-RU" : "en-US")}</span>
+              <span style={{ color: p.fgMuted }}>{t.updated}:</span><span>{formatDateTime(activeLesson.updatedAt, getLang() === "ru" ? "ru-RU" : "en-US")}</span>
+            </div>
+            <div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead><tr style={{ color: p.fgMuted, textAlign: "left" }}>
+                  <th style={{ padding: "6px 8px 6px 0", fontWeight: "normal" }}>{t.date}</th>
+                  <th style={{ padding: "6px 0", fontWeight: "normal", textAlign: "right" }}>{t.duration}</th>
+                </tr></thead>
+                <tbody>
+                  {Object.entries(activeLesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > 30).sort(([dateA], [dateB]) => dateB.localeCompare(dateA)).map(([date, seconds]) => (
+                    <tr key={date} style={{ borderTop: `1px solid ${p.divider}` }}>
+                      <td style={{ padding: "7px 8px 7px 0" }}>{formatStudyDate(date, getLang() === "ru" ? "ru-RU" : "en-US")}</td>
+                      <td style={{ padding: "7px 0", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(seconds / 60)} {t.minutesShort}</td>
+                    </tr>
+                  ))}
+                  {Object.values(activeLesson.studySecondsByDate ?? {}).every(seconds => seconds <= 30) && <tr><td colSpan={2} style={{ padding: "8px 0", color: p.fgMuted }}>{t.noStudyTime}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <button type="button" disabled={lessonState.lessons.length <= 1} onClick={deleteCurrentLesson}
+                style={{ ...lnk, color: "#c0392b", opacity: lessonState.lessons.length <= 1 ? 0.4 : 1 }}>{t.deleteLesson}</button>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+                <button type="button" onClick={() => setLessonDetailsOpen(false)} style={lnk}>{t.close}</button>
+                <button type="submit" style={lnk}>{t.save}</button>
+              </div>
             </div>
           </form>
         </div>}
