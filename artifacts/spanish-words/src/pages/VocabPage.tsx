@@ -8,21 +8,20 @@ interface Word {
 }
 
 const DEFAULT_WORDS_TEXT = [
-  "я предлагаю\tpropongo",
-  "я предлагаю / я советую\tsugiero",
-  "я предполагаю\tsupongo",
-  "я предполагаю заранее\tpresupongo",
-  "я принимаю как данность / я предполагаю\tasumo",
-  "я понимаю / я воспринимаю\tpercibo",
-  "я замечаю\tnoto",
-  "я наблюдаю\tobservo",
-  "я считаю / я полагаю\tconsidero",
-  "я признаю\treconozco",
-  "я соглашаюсь\tacepto",
-  "я отказываюсь\trechazo",
-  "я объясняю\texplico",
-  "я описываю\tdescribo",
-  "я упоминаю\tmenciono",
+  "#lang Русский Испанский",
+  "Привет\tHola",
+  "Доброе утро\tBuenos días",
+  "Пожалуйста\tPor favor",
+  "Спасибо\tGracias",
+  "Да\tSí",
+  "Нет\tNo",
+  "Я не понимаю\tNo entiendo\t1",
+  "Вы говорите по-английски?\t¿Habla inglés?\t1",
+  "Сколько это стоит?\t¿Cuánto cuesta?\t1",
+  "Где находится туалет?\t¿Dónde está el baño?\t2",
+  "Я хочу кофе, пожалуйста.\tQuiero un café, por favor.\t2",
+  "Счёт, пожалуйста.\tLa cuenta, por favor.",
+  "До свидания\tHasta luego",
 ].join("\n");
 
 const TAPS_KEY = "spanish-vocab-taps-v2";
@@ -159,7 +158,7 @@ function loadLessonState(): LessonState {
   } catch { /* ignore malformed settings */ }
   const lesson: Lesson = {
     id: `lesson-${now}`,
-    name: getLang() === "ru" ? "Урок ноль" : "Lesson zero",
+    name: getLang() === "ru" ? "Пример — поездка" : "Sample — travel",
     wordsText,
     createdAt: now,
     updatedAt: now,
