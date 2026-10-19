@@ -505,6 +505,8 @@ export default function VocabPage() {
   });
   const revealButtonDragRef = useRef<{ pointerId: number; startX: number; startY: number; left: number; top: number; moved: boolean } | null>(null);
   const suppressRevealButtonClickRef = useRef(false);
+  const revealScrollFrameRef = useRef<number | null>(null);
+  const revealScrollTargetRef = useRef<number | null>(null);
 
   const accrueStudyTime = useCallback((now: number) => {
     const tracker = activityRef.current;
@@ -661,11 +663,36 @@ export default function VocabPage() {
     return true;
   }, [displayWords, nextHiddenWord, revealed]);
 
+  const scrollByRevealHeight = (height: number) => {
+    const startY = window.scrollY;
+    const targetY = (revealScrollFrameRef.current !== null ? revealScrollTargetRef.current ?? startY : startY) + height;
+    if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
+    revealScrollTargetRef.current = targetY;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      window.scrollTo(0, targetY);
+      revealScrollFrameRef.current = null;
+      revealScrollTargetRef.current = null;
+      return;
+    }
+    const startTime = performance.now();
+    const duration = 1000;
+    const animate = (now: number) => {
+      const progress = Math.min(1, (now - startTime) / duration);
+      const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - ((-2 * progress + 2) ** 3) / 2;
+      window.scrollTo(0, startY + (targetY - startY) * eased);
+      if (progress < 1) revealScrollFrameRef.current = requestAnimationFrame(animate);
+      else {
+        revealScrollFrameRef.current = null;
+        revealScrollTargetRef.current = null;
+      }
+    };
+    revealScrollFrameRef.current = requestAnimationFrame(animate);
+  };
+
   const revealNextFromButton = () => {
     if (!nextHiddenWord) return;
     const row = document.querySelector<HTMLElement>(`[data-testid="row-word-${nextHiddenWord.id}"]`);
     const answer = row?.querySelector<HTMLElement>(".answer-reveal");
-    const initialHeight = row?.getBoundingClientRect().height ?? 0;
     if (!revealNext() || !row || !answer) return;
 
     let finished = false;
@@ -676,8 +703,8 @@ export default function VocabPage() {
       window.clearTimeout(fallbackTimer);
       answer.removeEventListener("transitionend", onTransitionEnd);
       requestAnimationFrame(() => {
-        const heightAdded = row.getBoundingClientRect().height - initialHeight;
-        if (heightAdded > 0) window.scrollBy({ top: heightAdded, behavior: "smooth" });
+        const rowHeight = row.getBoundingClientRect().height;
+        if (rowHeight > 0) scrollByRevealHeight(rowHeight);
       });
     };
     const onTransitionEnd = (event: TransitionEvent) => {
@@ -689,6 +716,10 @@ export default function VocabPage() {
   };
 
   const hasHiddenWords = nextHiddenWord !== undefined;
+
+  useEffect(() => () => {
+    if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
+  }, []);
 
   useEffect(() => {
     const clampPosition = () => setRevealButtonPosition(position => position ? {
