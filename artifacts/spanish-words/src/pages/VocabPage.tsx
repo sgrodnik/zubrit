@@ -30,7 +30,10 @@ const WORDS_KEY = "spanish-vocab-words";
 const LESSONS_KEY = "spanish-vocab-lessons-v1";
 const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
 const REVEAL_BUTTON_POSITION_KEY = "spanish-vocab-reveal-button-position-v1";
-const REVEAL_BUTTON_SIZE = 104;
+const DEFAULT_REVEAL_BUTTON_SIZE = 104;
+const MIN_REVEAL_BUTTON_SIZE = 48;
+const MAX_REVEAL_BUTTON_SIZE = 200;
+const SCROLL_TO_TOP_DURATION_MS = 700;
 const BACKUP_FORMAT = "spanish-words-backup";
 const BACKUP_VERSION = 1;
 const IDLE_TIMEOUT_MS = 10_000;
@@ -215,6 +218,9 @@ const LANGUAGES = {
     noActivity: "нет активности",
     revealNextHint: "Пробел: открыть следующую строку",
     revealNext: "Открыть следующую строку",
+    autoScroll: "Автоматическая прокрутка",
+    showRevealButton: "Показывать плавающую кнопку",
+    revealButtonSize: "Размер кнопки (px)",
     scrollToTop: "Прокрутить наверх",
     restartReveals: "Закрыть все строки и начать заново",
     dragToMove: "Перетащите, чтобы переместить",
@@ -275,6 +281,9 @@ const LANGUAGES = {
     noActivity: "no activity",
     revealNextHint: "Space: reveal the next row",
     revealNext: "Reveal the next row",
+    autoScroll: "Automatic scrolling",
+    showRevealButton: "Show floating button",
+    revealButtonSize: "Button size (px)",
     scrollToTop: "Scroll to top",
     restartReveals: "Hide all answers and start again",
     dragToMove: "Drag to move",
@@ -301,7 +310,7 @@ function loadTaps(): Record<string, number> {
   catch { return {}; }
 }
 type Theme = "day" | "night" | "auto";
-interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; maxWidth: number; }
+interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; maxWidth: number; autoScroll: boolean; showRevealButton: boolean; revealButtonSize: number; }
 
 function normalizeSettings(value: any): Settings {
   const p = value && typeof value === "object" ? value : {};
@@ -314,6 +323,9 @@ function normalizeSettings(value: any): Settings {
     theme,
     soft: typeof p.soft === "boolean" ? p.soft : true,
     maxWidth: Number.isFinite(p.maxWidth) ? p.maxWidth : 680,
+    autoScroll: typeof p.autoScroll === "boolean" ? p.autoScroll : true,
+    showRevealButton: typeof p.showRevealButton === "boolean" ? p.showRevealButton : true,
+    revealButtonSize: Number.isFinite(p.revealButtonSize) ? Math.round(Math.min(MAX_REVEAL_BUTTON_SIZE, Math.max(MIN_REVEAL_BUTTON_SIZE, p.revealButtonSize))) : DEFAULT_REVEAL_BUTTON_SIZE,
   };
 }
 
@@ -484,6 +496,10 @@ export default function VocabPage() {
   const wordsText = activeLesson.wordsText;
   const words = useMemo(() => parseWords(wordsText), [wordsText]);
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const [revealButtonSizeDraft, setRevealButtonSizeDraft] = useState(String(settings.revealButtonSize));
+  const revealButtonSize = Math.min(MAX_REVEAL_BUTTON_SIZE, Math.max(MIN_REVEAL_BUTTON_SIZE, settings.revealButtonSize));
   const [createLessonOpen, setCreateLessonOpen] = useState(false);
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
   const [copyLesson, setCopyLesson] = useState(true);
@@ -511,6 +527,7 @@ export default function VocabPage() {
   const suppressRevealButtonClickRef = useRef(false);
   const revealScrollFrameRef = useRef<number | null>(null);
   const revealScrollTargetRef = useRef<number | null>(null);
+  const revealControlActionRef = useRef<() => void>(() => {});
   const scrollYRef = useRef(typeof window === "undefined" ? 0 : window.scrollY);
   const [isAtTop, setIsAtTop] = useState(() => typeof window === "undefined" || window.scrollY <= 1);
 
@@ -551,6 +568,7 @@ export default function VocabPage() {
     tracker.accountedUntil = now;
   }, [accrueStudyTime]);
 
+  useEffect(() => { setRevealButtonSizeDraft(String(settings.revealButtonSize)); }, [settings.revealButtonSize]);
   useEffect(() => {
     localStorage.setItem(LESSONS_KEY, JSON.stringify({ lessons: lessonState.lessons }));
     localStorage.setItem(ACTIVE_LESSON_KEY, lessonState.activeId);
@@ -669,7 +687,7 @@ export default function VocabPage() {
     return true;
   }, [displayWords, nextHiddenWord, revealed]);
 
-  const animateScrollTo = (targetY: number) => {
+  const animateScrollTo = (targetY: number, durationMs = 2000) => {
     if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
     const startY = window.scrollY;
     revealScrollTargetRef.current = targetY;
@@ -680,7 +698,7 @@ export default function VocabPage() {
       return;
     }
     const startTime = performance.now();
-    const duration = 2000;
+    const duration = durationMs;
     const animate = (now: number) => {
       const progress = Math.min(1, (now - startTime) / duration);
       const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - ((-2 * progress + 2) ** 3) / 2;
@@ -703,7 +721,7 @@ export default function VocabPage() {
     if (!nextHiddenWord) return;
     const row = document.querySelector<HTMLElement>(`[data-testid="row-word-${nextHiddenWord.id}"]`);
     const answer = row?.querySelector<HTMLElement>(".answer-reveal");
-    if (!revealNext() || !row || !answer) return;
+    if (!revealNext() || !settings.autoScroll || !row || !answer) return;
 
     let finished = false;
     let fallbackTimer = 0;
@@ -714,7 +732,7 @@ export default function VocabPage() {
       answer.removeEventListener("transitionend", onTransitionEnd);
       requestAnimationFrame(() => {
         const rowHeight = row.getBoundingClientRect().height;
-        if (rowHeight > 0) scrollByRevealHeight(rowHeight);
+        if (settingsRef.current.autoScroll && rowHeight > 0) scrollByRevealHeight(rowHeight);
       });
     };
     const onTransitionEnd = (event: TransitionEvent) => {
@@ -726,6 +744,17 @@ export default function VocabPage() {
   };
 
   const hasHiddenWords = nextHiddenWord !== undefined;
+  const handleRevealControlAction = () => {
+    if (hasHiddenWords) {
+      revealNextFromButton();
+    } else if (settings.autoScroll && scrollYRef.current > 1) {
+      animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
+    } else {
+      setRevealed(new Set());
+      setAllRevealed(false);
+    }
+  };
+  revealControlActionRef.current = handleRevealControlAction;
 
   useEffect(() => () => {
     if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
@@ -744,13 +773,13 @@ export default function VocabPage() {
 
   useEffect(() => {
     const clampPosition = () => setRevealButtonPosition(position => position ? {
-      left: Math.max(0, Math.min(position.left, window.innerWidth - REVEAL_BUTTON_SIZE)),
-      top: Math.max(0, Math.min(position.top, window.innerHeight - REVEAL_BUTTON_SIZE)),
+      left: Math.max(0, Math.min(position.left, window.innerWidth - revealButtonSize)),
+      top: Math.max(0, Math.min(position.top, window.innerHeight - revealButtonSize)),
     } : null);
     clampPosition();
     window.addEventListener("resize", clampPosition);
     return () => window.removeEventListener("resize", clampPosition);
-  }, []);
+  }, [revealButtonSize]);
 
   const startRevealButtonDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -767,8 +796,8 @@ export default function VocabPage() {
     if (!drag.moved && Math.hypot(deltaX, deltaY) < 5) return;
     drag.moved = true;
     setRevealButtonPosition({
-      left: Math.max(0, Math.min(drag.left + deltaX, window.innerWidth - REVEAL_BUTTON_SIZE)),
-      top: Math.max(0, Math.min(drag.top + deltaY, window.innerHeight - REVEAL_BUTTON_SIZE)),
+      left: Math.max(0, Math.min(drag.left + deltaX, window.innerWidth - event.currentTarget.offsetWidth)),
+      top: Math.max(0, Math.min(drag.top + deltaY, window.innerHeight - event.currentTarget.offsetHeight)),
     });
   };
 
@@ -781,8 +810,8 @@ export default function VocabPage() {
         window.setTimeout(() => { suppressRevealButtonClickRef.current = false; }, 500);
       }
       const position = {
-        left: Math.max(0, Math.min(drag.left + event.clientX - drag.startX, window.innerWidth - REVEAL_BUTTON_SIZE)),
-        top: Math.max(0, Math.min(drag.top + event.clientY - drag.startY, window.innerHeight - REVEAL_BUTTON_SIZE)),
+        left: Math.max(0, Math.min(drag.left + event.clientX - drag.startX, window.innerWidth - event.currentTarget.offsetWidth)),
+        top: Math.max(0, Math.min(drag.top + event.clientY - drag.startY, window.innerHeight - event.currentTarget.offsetHeight)),
       };
       setRevealButtonPosition(position);
       try { localStorage.setItem(REVEAL_BUTTON_POSITION_KEY, JSON.stringify(position)); } catch { /* position is still available for this session */ }
@@ -795,13 +824,12 @@ export default function VocabPage() {
       if (event.code !== "Space" || event.repeat || createLessonOpen || lessonDetailsOpen) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, button, summary, a, [contenteditable='true'], [role='button']")) return;
-      if (!hasHiddenWords) return;
       event.preventDefault();
-      revealNext();
+      revealControlActionRef.current();
     };
     document.addEventListener("keydown", onShortcut);
     return () => document.removeEventListener("keydown", onShortcut);
-  }, [createLessonOpen, lessonDetailsOpen, hasHiddenWords, revealNext]);
+  }, [createLessonOpen, lessonDetailsOpen]);
 
   const updateActiveLesson = (update: (lesson: Lesson) => Lesson, updateTimestamp = true) => {
     setLessonState(state => ({
@@ -960,8 +988,9 @@ export default function VocabPage() {
   const inverted = isInverted(wordsText);
   const todayStudyDate = studyDateKey(Date.now());
   const sortedLessons = [...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt);
-  const revealButtonLabel = hasHiddenWords ? t.revealNext : isAtTop ? t.restartReveals : t.scrollToTop;
-  const revealButtonIcon = hasHiddenWords ? "↓" : isAtTop ? "↻" : "↑";
+  const buttonOffersTop = settings.autoScroll && !isAtTop;
+  const revealButtonLabel = hasHiddenWords ? t.revealNext : buttonOffersTop ? t.scrollToTop : t.restartReveals;
+  const revealButtonIcon = hasHiddenWords ? "↓" : buttonOffersTop ? "↑" : "↻";
   const revealButtonTitle = `${revealButtonLabel}${hasHiddenWords ? ` · ${t.revealNextHint}` : ""} · ${t.dragToMove}`;
 
   return (
@@ -1123,6 +1152,39 @@ export default function VocabPage() {
               <span style={{ width: 36, color: p.fgMuted }}>{settings.rowSpacing}px</span>
             </label>
 
+            <label style={lbl}>
+              <span style={{ width: 120 }}>{t.autoScroll}</span>
+              <input type="checkbox" checked={settings.autoScroll} onChange={event => {
+                if (!event.target.checked && revealScrollFrameRef.current !== null) {
+                  cancelAnimationFrame(revealScrollFrameRef.current);
+                  revealScrollFrameRef.current = null;
+                  revealScrollTargetRef.current = null;
+                }
+                setSettings(s => ({ ...s, autoScroll: event.target.checked }));
+              }} />
+            </label>
+
+            <label style={lbl}>
+              <span style={{ width: 120 }}>{t.showRevealButton}</span>
+              <input type="checkbox" checked={settings.showRevealButton}
+                onChange={event => setSettings(s => ({ ...s, showRevealButton: event.target.checked }))} />
+            </label>
+
+            <label style={lbl}>
+              <span style={{ width: 120 }}>{t.revealButtonSize}</span>
+              <input type="number" min={MIN_REVEAL_BUTTON_SIZE} max={MAX_REVEAL_BUTTON_SIZE} value={revealButtonSizeDraft}
+                onChange={event => setRevealButtonSizeDraft(event.target.value)}
+                onBlur={() => {
+                  const value = Number(revealButtonSizeDraft);
+                  const size = revealButtonSizeDraft.trim() && Number.isFinite(value)
+                    ? Math.round(Math.min(MAX_REVEAL_BUTTON_SIZE, Math.max(MIN_REVEAL_BUTTON_SIZE, value)))
+                    : settings.revealButtonSize;
+                  setRevealButtonSizeDraft(String(size));
+                  setSettings(s => ({ ...s, revealButtonSize: size }));
+                }}
+                style={{ width: 76, padding: "4px 6px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+            </label>
+
             {/* 4. Width (desktop only) */}
             <label className="zw" style={lbl}>
               <span style={{ width: 120 }}>{t.width}</span>
@@ -1205,7 +1267,7 @@ export default function VocabPage() {
           </tbody>
         </table>
       </div>
-      {displayWords.length > 0 && !createLessonOpen && !lessonDetailsOpen && <button
+      {settings.showRevealButton && displayWords.length > 0 && !createLessonOpen && !lessonDetailsOpen && <button
         type="button"
         aria-label={revealButtonLabel}
         title={revealButtonTitle}
@@ -1215,17 +1277,13 @@ export default function VocabPage() {
             event.preventDefault();
             return;
           }
-          if (hasHiddenWords) revealNextFromButton();
-          else if (scrollYRef.current <= 1) {
-            setRevealed(new Set());
-            setAllRevealed(false);
-          } else animateScrollTo(0);
+          handleRevealControlAction();
         }}
         onPointerDown={startRevealButtonDrag}
         onPointerMove={moveRevealButton}
         onPointerUp={finishRevealButtonDrag}
         onPointerCancel={finishRevealButtonDrag}
-        style={{ position: "fixed", left: revealButtonPosition ? `${revealButtonPosition.left}px` : undefined, top: revealButtonPosition ? `${revealButtonPosition.top}px` : undefined, right: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-right, 0px))", bottom: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: REVEAL_BUTTON_SIZE, height: REVEAL_BUTTON_SIZE, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: 52, lineHeight: 1, cursor: "grab", touchAction: "none", userSelect: "none", transition: "transform 150ms ease" }}
+        style={{ position: "fixed", left: revealButtonPosition ? `${revealButtonPosition.left}px` : undefined, top: revealButtonPosition ? `${revealButtonPosition.top}px` : undefined, right: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-right, 0px))", bottom: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: revealButtonSize, height: revealButtonSize, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: revealButtonSize / 2, lineHeight: 1, cursor: "grab", touchAction: "none", userSelect: "none", transition: "transform 150ms ease" }}
       >{revealButtonIcon}</button>}
     </>
   );
