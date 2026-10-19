@@ -215,6 +215,8 @@ const LANGUAGES = {
     noActivity: "нет активности",
     revealNextHint: "Пробел: открыть следующую строку",
     revealNext: "Открыть следующую строку",
+    scrollToTop: "Прокрутить наверх",
+    restartReveals: "Закрыть все строки и начать заново",
     dragToMove: "Перетащите, чтобы переместить",
     lesson: "Урок",
     newLesson: "Новый урок",
@@ -273,6 +275,8 @@ const LANGUAGES = {
     noActivity: "no activity",
     revealNextHint: "Space: reveal the next row",
     revealNext: "Reveal the next row",
+    scrollToTop: "Scroll to top",
+    restartReveals: "Hide all answers and start again",
     dragToMove: "Drag to move",
     lesson: "Lesson",
     newLesson: "New lesson",
@@ -507,6 +511,8 @@ export default function VocabPage() {
   const suppressRevealButtonClickRef = useRef(false);
   const revealScrollFrameRef = useRef<number | null>(null);
   const revealScrollTargetRef = useRef<number | null>(null);
+  const scrollYRef = useRef(typeof window === "undefined" ? 0 : window.scrollY);
+  const [isAtTop, setIsAtTop] = useState(() => typeof window === "undefined" || window.scrollY <= 1);
 
   const accrueStudyTime = useCallback((now: number) => {
     const tracker = activityRef.current;
@@ -663,10 +669,9 @@ export default function VocabPage() {
     return true;
   }, [displayWords, nextHiddenWord, revealed]);
 
-  const scrollByRevealHeight = (height: number) => {
-    const startY = window.scrollY;
-    const targetY = (revealScrollFrameRef.current !== null ? revealScrollTargetRef.current ?? startY : startY) + height;
+  const animateScrollTo = (targetY: number) => {
     if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
+    const startY = window.scrollY;
     revealScrollTargetRef.current = targetY;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       window.scrollTo(0, targetY);
@@ -675,7 +680,7 @@ export default function VocabPage() {
       return;
     }
     const startTime = performance.now();
-    const duration = 1000;
+    const duration = 2000;
     const animate = (now: number) => {
       const progress = Math.min(1, (now - startTime) / duration);
       const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - ((-2 * progress + 2) ** 3) / 2;
@@ -687,6 +692,11 @@ export default function VocabPage() {
       }
     };
     revealScrollFrameRef.current = requestAnimationFrame(animate);
+  };
+
+  const scrollByRevealHeight = (height: number) => {
+    const currentTarget = revealScrollFrameRef.current !== null ? revealScrollTargetRef.current ?? window.scrollY : window.scrollY;
+    animateScrollTo(currentTarget + height);
   };
 
   const revealNextFromButton = () => {
@@ -719,6 +729,17 @@ export default function VocabPage() {
 
   useEffect(() => () => {
     if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const scrollY = window.scrollY;
+      scrollYRef.current = scrollY;
+      setIsAtTop(current => current === (scrollY <= 1) ? current : scrollY <= 1);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   useEffect(() => {
@@ -939,6 +960,9 @@ export default function VocabPage() {
   const inverted = isInverted(wordsText);
   const todayStudyDate = studyDateKey(Date.now());
   const sortedLessons = [...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt);
+  const revealButtonLabel = hasHiddenWords ? t.revealNext : isAtTop ? t.restartReveals : t.scrollToTop;
+  const revealButtonIcon = hasHiddenWords ? "↓" : isAtTop ? "↻" : "↑";
+  const revealButtonTitle = `${revealButtonLabel}${hasHiddenWords ? ` · ${t.revealNextHint}` : ""} · ${t.dragToMove}`;
 
   return (
     <>
@@ -1181,24 +1205,28 @@ export default function VocabPage() {
           </tbody>
         </table>
       </div>
-      {hasHiddenWords && !createLessonOpen && !lessonDetailsOpen && <button
+      {displayWords.length > 0 && !createLessonOpen && !lessonDetailsOpen && <button
         type="button"
-        aria-label={t.revealNext}
-        title={`${t.revealNext} · ${t.revealNextHint} · ${t.dragToMove}`}
+        aria-label={revealButtonLabel}
+        title={revealButtonTitle}
         onClick={event => {
           if (suppressRevealButtonClickRef.current) {
             suppressRevealButtonClickRef.current = false;
             event.preventDefault();
             return;
           }
-          revealNextFromButton();
+          if (hasHiddenWords) revealNextFromButton();
+          else if (scrollYRef.current <= 1) {
+            setRevealed(new Set());
+            setAllRevealed(false);
+          } else animateScrollTo(0);
         }}
         onPointerDown={startRevealButtonDrag}
         onPointerMove={moveRevealButton}
         onPointerUp={finishRevealButtonDrag}
         onPointerCancel={finishRevealButtonDrag}
         style={{ position: "fixed", left: revealButtonPosition ? `${revealButtonPosition.left}px` : undefined, top: revealButtonPosition ? `${revealButtonPosition.top}px` : undefined, right: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-right, 0px))", bottom: revealButtonPosition ? "auto" : "max(16px, env(safe-area-inset-bottom, 0px))", zIndex: 50, width: REVEAL_BUTTON_SIZE, height: REVEAL_BUTTON_SIZE, border: `1px solid ${p.fgMuted}`, borderRadius: "50%", background: p.fg, color: p.bg, boxShadow: "0 2px 10px #0003", display: "grid", placeItems: "center", fontSize: 52, lineHeight: 1, cursor: "grab", touchAction: "none", userSelect: "none", transition: "transform 150ms ease" }}
-      >↓</button>}
+      >{revealButtonIcon}</button>}
     </>
   );
 }
