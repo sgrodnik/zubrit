@@ -35,6 +35,7 @@ const BACKUP_FORMAT = "spanish-words-backup";
 const BACKUP_VERSION = 1;
 const IDLE_TIMEOUT_MS = 10_000;
 const MIN_VISIBLE_STUDY_SECONDS = 30;
+const REVEAL_TRANSITION_MS = 180;
 
 type Lesson = { id: string; name: string; wordsText: string; createdAt: number; updatedAt: number; studySecondsByDate: Record<string, number> };
 type LessonState = { lessons: Lesson[]; activeId: string };
@@ -652,15 +653,42 @@ export default function VocabPage() {
     [baseWords, activeFilterLevel]
   );
 
+  const nextHiddenWord = displayWords.find(word => !revealed.has(word.russian));
   const revealNext = useCallback(() => {
-    const nextWord = displayWords.find(word => !revealed.has(word.russian));
-    if (!nextWord) return false;
-    setRevealed(previous => new Set(previous).add(nextWord.russian));
-    if (!displayWords.some(word => word.russian !== nextWord.russian && !revealed.has(word.russian))) setAllRevealed(true);
+    if (!nextHiddenWord) return false;
+    setRevealed(previous => new Set(previous).add(nextHiddenWord.russian));
+    if (!displayWords.some(word => word.russian !== nextHiddenWord.russian && !revealed.has(word.russian))) setAllRevealed(true);
     return true;
-  }, [displayWords, revealed]);
+  }, [displayWords, nextHiddenWord, revealed]);
 
-  const hasHiddenWords = displayWords.some(word => !revealed.has(word.russian));
+  const revealNextFromButton = () => {
+    if (!nextHiddenWord) return;
+    const row = document.querySelector<HTMLElement>(`[data-testid="row-word-${nextHiddenWord.id}"]`);
+    const answer = row?.querySelector<HTMLElement>(".answer-reveal");
+    const initialHeight = row?.getBoundingClientRect().height ?? 0;
+    if (!revealNext() || !row || !answer) return;
+
+    let finished = false;
+    let fallbackTimer = 0;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(fallbackTimer);
+      answer.removeEventListener("transitionend", onTransitionEnd);
+      requestAnimationFrame(() => {
+        const heightAdded = row.getBoundingClientRect().height - initialHeight;
+        if (heightAdded > 0) window.scrollBy({ top: heightAdded, behavior: "smooth" });
+      });
+    };
+    const onTransitionEnd = (event: TransitionEvent) => {
+      if (event.target === answer && event.propertyName === "grid-template-rows") finish();
+    };
+    answer.addEventListener("transitionend", onTransitionEnd);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) requestAnimationFrame(finish);
+    else fallbackTimer = window.setTimeout(finish, REVEAL_TRANSITION_MS + 50);
+  };
+
+  const hasHiddenWords = nextHiddenWord !== undefined;
 
   useEffect(() => {
     const clampPosition = () => setRevealButtonPosition(position => position ? {
@@ -897,9 +925,9 @@ export default function VocabPage() {
         details.zs[open]::details-content { height: auto; opacity: 1; }
         @media (prefers-reduced-motion: reduce) { details.zs::details-content { transition: none; } }
         .zw { display: flex; }
-        .answer-reveal { position: relative; display: grid; grid-template-rows: 0fr; min-height: 0.6em; transition: grid-template-rows 180ms ease; }
+        .answer-reveal { position: relative; display: grid; grid-template-rows: 0fr; min-height: 0.6em; transition: grid-template-rows ${REVEAL_TRANSITION_MS}ms ease; }
         .answer-reveal.is-open { grid-template-rows: 1fr; }
-        .answer-reveal__content { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-2px); transition: opacity 150ms ease, transform 180ms ease; }
+        .answer-reveal__content { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-2px); transition: opacity 150ms ease, transform ${REVEAL_TRANSITION_MS}ms ease; }
         .answer-reveal.is-open .answer-reveal__content { opacity: 1; transform: translateY(0); }
         .answer-reveal__placeholder { position: absolute; left: 0; top: 50%; width: 4em; height: 0.6em; transform: translateY(-50%); transition: opacity 120ms ease; }
         .answer-reveal.is-open .answer-reveal__placeholder { opacity: 0; }
@@ -1132,7 +1160,7 @@ export default function VocabPage() {
             event.preventDefault();
             return;
           }
-          revealNext();
+          revealNextFromButton();
         }}
         onPointerDown={startRevealButtonDrag}
         onPointerMove={moveRevealButton}
