@@ -34,6 +34,7 @@ const REVEAL_BUTTON_SIZE = 104;
 const BACKUP_FORMAT = "spanish-words-backup";
 const BACKUP_VERSION = 1;
 const IDLE_TIMEOUT_MS = 10_000;
+const MIN_VISIBLE_STUDY_SECONDS = 30;
 
 type Lesson = { id: string; name: string; wordsText: string; createdAt: number; updatedAt: number; studySecondsByDate: Record<string, number> };
 type LessonState = { lessons: Lesson[]; activeId: string };
@@ -115,7 +116,7 @@ function daysBetweenDateKeys(earlier: string, later: string): number {
 }
 
 function lessonStudySummary(lesson: Lesson, today: string, t: { minutesShort: string; noActivity: string; today: string; daysAgo: string }): string {
-  const entries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > 0);
+  const entries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
   const totalSeconds = entries.reduce((total, [, seconds]) => total + seconds, 0);
   if (entries.length === 0) return `0 ${t.minutesShort} · ${t.noActivity}`;
   const dates = entries.map(([date]) => date).sort();
@@ -940,13 +941,13 @@ export default function VocabPage() {
                   <th style={{ padding: "6px 0", fontWeight: "normal", textAlign: "right" }}>{t.duration}</th>
                 </tr></thead>
                 <tbody>
-                  {Object.entries(activeLesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > 30).sort(([dateA], [dateB]) => dateB.localeCompare(dateA)).map(([date, seconds]) => (
+                  {Object.entries(activeLesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS).sort(([dateA], [dateB]) => dateB.localeCompare(dateA)).map(([date, seconds]) => (
                     <tr key={date} style={{ borderTop: `1px solid ${p.divider}` }}>
                       <td style={{ padding: "7px 8px 7px 0" }}>{formatStudyDate(date, getLang() === "ru" ? "ru-RU" : "en-US")}</td>
                       <td style={{ padding: "7px 0", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(seconds / 60)} {t.minutesShort}</td>
                     </tr>
                   ))}
-                  {Object.values(activeLesson.studySecondsByDate ?? {}).every(seconds => seconds <= 30) && <tr><td colSpan={2} style={{ padding: "8px 0", color: p.fgMuted }}>{t.noStudyTime}</td></tr>}
+                  {Object.values(activeLesson.studySecondsByDate ?? {}).every(seconds => seconds <= MIN_VISIBLE_STUDY_SECONDS) && <tr><td colSpan={2} style={{ padding: "8px 0", color: p.fgMuted }}>{t.noStudyTime}</td></tr>}
                 </tbody>
               </table>
             </div>
