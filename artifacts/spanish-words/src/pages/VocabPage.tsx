@@ -1,10 +1,11 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { Fragment, useState, useCallback, useRef, useEffect, useMemo } from "react";
 
 interface Word {
   id: number;
   russian: string;
   spanish: string;
   complexity: number;
+  group: number;
 }
 
 const DEFAULT_WORDS_TEXT = [
@@ -336,21 +337,32 @@ function loadSettings(): Settings {
 function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
 function parseWords(text: string): Word[] {
-  return text.split("\n").reduce<Word[]>((acc, rawLine, index) => {
+  const words: Word[] = [];
+  let group = 0;
+  let separatorPending = false;
+  for (const [index, rawLine] of text.split("\n").entries()) {
     const line = rawLine.trim();
-    if (!line) return acc;
+    if (!line) {
+      if (words.length > 0) separatorPending = true;
+      continue;
+    }
     const content = line.replace(/\t\d+\s*$/, "");
     let parts: string[] = [];
     if (content.includes("\t")) parts = content.split("\t");
     else if (content.includes(" — ")) parts = content.split(" — ");
     else if (content.includes(" - ")) parts = content.split(" - ");
-    else return acc;
+    else continue;
     const russian = parts[0]?.trim();
     const spanish = parts[1]?.trim();
     const complexity = Number(line.match(/\t(\d+)\s*$/)?.[1] ?? 0);
-    if (russian && spanish) acc.push({ id: index + 1, russian, spanish, complexity });
-    return acc;
-  }, []);
+    if (!russian || !spanish) continue;
+    if (separatorPending) {
+      group++;
+      separatorPending = false;
+    }
+    words.push({ id: index + 1, russian, spanish, complexity, group });
+  }
+  return words;
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -360,6 +372,16 @@ function shuffle<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+function shuffleWithinGroups(words: Word[]): Word[] {
+  const groups = new Map<number, Word[]>();
+  for (const word of words) {
+    const group = groups.get(word.group) ?? [];
+    group.push(word);
+    groups.set(word.group, group);
+  }
+  return [...groups.values()].flatMap(shuffle);
 }
 
 // ── Theme colours ─────────────────────────────────────────────────────────────
@@ -513,7 +535,7 @@ export default function VocabPage() {
     visible: typeof document === "undefined" || document.visibilityState === "visible",
   });
   const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
-    settings.randomize ? shuffle(words) : []
+    settings.randomize ? shuffleWithinGroups(words) : []
   );
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [allRevealed, setAllRevealed] = useState(false);
@@ -651,7 +673,7 @@ export default function VocabPage() {
   const p = settings.soft ? softenPalette(baseP, isDark) : baseP;
 
   const handleRandomize = (val: boolean) => {
-    if (val) setShuffledWords(shuffle(words));
+    if (val) setShuffledWords(shuffleWithinGroups(words));
     setSettings(s => ({ ...s, randomize: val }));
   };
 
@@ -661,7 +683,7 @@ export default function VocabPage() {
   );
 
   useEffect(() => {
-    if (settings.randomize) setShuffledWords(shuffle(words));
+    if (settings.randomize) setShuffledWords(shuffleWithinGroups(words));
   }, [words, settings.randomize]);
 
   // Filter — not persisted, resets on page reload
@@ -1243,25 +1265,31 @@ export default function VocabPage() {
             </tr>
           </thead>
           <tbody>
-            {displayWords.map(word => {
+            {displayWords.map((word, index) => {
               const count = word.complexity;
               const isRevealed = revealed.has(word.russian);
+              const previousWord = displayWords[index - 1];
               return (
-                <tr key={word.id} data-testid={`row-word-${word.id}`}>
-                  <td style={{ ...cell, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>{inverted ? word.spanish : word.russian}</td>
-                  <td style={{ ...cell, textAlign: "center", padding: 0 }}>
-                    <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
-                  </td>
-                  <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
-                    style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg, overflowWrap: "anywhere" }}>
-                    <div className={`answer-reveal${isRevealed ? " is-open" : ""}`}>
-                      <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />
-                      <span className="answer-reveal__content" aria-hidden={!isRevealed}>
-                        {inverted ? word.russian : word.spanish}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
+                <Fragment key={word.id}>
+                  {previousWord && previousWord.group !== word.group && <tr aria-hidden="true" data-testid={`separator-before-word-${word.id}`}>
+                    <td colSpan={3} style={{ padding: "4px 0", border: 0 }}><div style={{ height: 1, background: p.fgMuted }} /></td>
+                  </tr>}
+                  <tr data-testid={`row-word-${word.id}`}>
+                    <td style={{ ...cell, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>{inverted ? word.spanish : word.russian}</td>
+                    <td style={{ ...cell, textAlign: "center", padding: 0 }}>
+                      <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
+                    </td>
+                    <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
+                      style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg, overflowWrap: "anywhere" }}>
+                      <div className={`answer-reveal${isRevealed ? " is-open" : ""}`}>
+                        <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />
+                        <span className="answer-reveal__content" aria-hidden={!isRevealed}>
+                          {inverted ? word.russian : word.spanish}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                </Fragment>
               );
             })}
           </tbody>
