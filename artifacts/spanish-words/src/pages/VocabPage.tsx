@@ -1,4 +1,4 @@
-import { Fragment, useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 
 interface Word {
   id: number;
@@ -178,6 +178,7 @@ function loadLessonState(): LessonState {
 const LANGUAGES = {
   ru: {
     settings: "Настройки",
+    detailedSettings: "Подробные настройки",
     hideAll: "скрыть все",
     showAll: "показать все",
     wordListHint: "Список слов — пара на строку, разделитель Tab или « — »; сложность третьим полем через Tab. #lang Русский Турецкий задаёт заголовки, #i меняет направление",
@@ -241,6 +242,7 @@ const LANGUAGES = {
   },
   en: {
     settings: "Settings",
+    detailedSettings: "Detailed settings",
     hideAll: "hide all",
     showAll: "show all",
     wordListHint: "Word list — one pair per line; complexity is an optional third Tab-separated field. #lang Russian Turkish sets headers, #i reverses direction",
@@ -433,13 +435,14 @@ function NumberedTextarea({ value, onChange, onBlur, p, maxHeight }: {
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const numRef = useRef<HTMLDivElement>(null);
+  const [sourceRevealed, setSourceRevealed] = useState(false);
   const lines = value.split("\n").length;
   const syncScroll = () => {
     if (taRef.current && numRef.current) numRef.current.scrollTop = taRef.current.scrollTop;
   };
   return (
     <div style={{ display: "flex", border: `1px solid ${p.fgVeryMuted}`, fontFamily: "monospace", fontSize: 12, lineHeight: "1.5", background: p.bg, maxHeight: maxHeight ?? undefined, overflow: "hidden" }}>
-      <div ref={numRef} style={{ padding: "4px 6px", color: p.fgVeryMuted, textAlign: "right", userSelect: "none", overflow: "hidden", minWidth: 28, background: p.divider, borderRight: `1px solid ${p.divider}`, whiteSpace: "pre" }}>
+      <div ref={numRef} style={{ padding: "4px 6px", color: p.fgVeryMuted, textAlign: "right", userSelect: "none", overflow: "hidden", minWidth: 28, background: p.divider, borderRight: `1px solid ${p.divider}`, whiteSpace: "pre", filter: sourceRevealed ? undefined : "blur(5px)" }}>
         {Array.from({ length: lines }, (_, i) => i + 1).join("\n")}
       </div>
       <textarea
@@ -447,9 +450,10 @@ function NumberedTextarea({ value, onChange, onBlur, p, maxHeight }: {
         data-testid="input-words"
         value={value}
         onChange={e => onChange(e.target.value)}
+        onFocus={() => setSourceRevealed(true)}
         onBlur={e => onBlur(e.target.value)}
         onScroll={syncScroll}
-        style={{ flex: 1, padding: "4px 6px", fontSize: 12, fontFamily: "monospace", lineHeight: "1.5", border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: p.bg, color: p.fg, height: maxHeight ?? "auto", overflowY: "auto" }}
+        style={{ flex: 1, padding: "4px 6px", fontSize: 12, fontFamily: "monospace", lineHeight: "1.5", border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: p.bg, color: p.fg, height: maxHeight ?? "auto", overflowY: "auto", filter: sourceRevealed ? undefined : "blur(5px)" }}
       />
     </div>
   );
@@ -1057,6 +1061,12 @@ export default function VocabPage() {
           </div>
         </div>
 
+        <div role="status" aria-live="polite" aria-label={`${revealedCount}/${totalCount} · ${pct}%`}
+          style={{ position: "sticky", top: 0, zIndex: 20, display: "flex", justifyContent: "flex-end", gap: 16, padding: "8px 0", marginBottom: "0.5rem", background: p.bg, color: p.fg, borderBottom: `1px solid ${p.divider}`, fontSize: 13 }}>
+          <span data-testid="vocab-progress-count">{revealedCount}/{totalCount}</span>
+          <span data-testid="vocab-progress-percent">{pct}%</span>
+        </div>
+
         {lessonDetailsOpen && <div role="dialog" aria-modal="true" aria-label={t.lessonDetails} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
           <form onSubmit={event => { event.preventDefault(); saveLessonName(); }} style={{ width: "min(480px, 100%)", maxHeight: "85vh", overflowY: "auto", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 14 }}>
             <strong>{t.lessonDetails}</strong>
@@ -1115,12 +1125,6 @@ export default function VocabPage() {
             <span>{t.settings}</span>
             {/* Right: controls — stop propagation so they don't toggle details */}
             <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }} onClick={e => e.preventDefault()}>
-              <span style={{ color: p.fgVeryMuted }}>
-                {revealedCount}/{totalCount}
-              </span>
-              <span style={{ color: p.fgVeryMuted }}>
-                {pct}%
-              </span>
               <button data-testid="button-toggle-all" title={t.revealNextHint} onClick={toggleAll} style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
                 {allRevealed ? t.hideAll : t.showAll}
               </button>
@@ -1128,94 +1132,7 @@ export default function VocabPage() {
           </summary>
 
           <div style={{ paddingTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
-
-            {/* 1. Word list */}
-            <div>
-              <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>
-                {t.wordListHint}
-              </div>
-              <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(
-                lesson => ({ ...lesson, wordsText: text }),
-                withoutLessonFlags(text) !== withoutLessonFlags(wordsText),
-              )} onBlur={() => {}} p={p} maxHeight={220} />
-            </div>
-
-            {/* 2. Theme */}
-            <label style={lbl}>
-              <span style={{ width: 120 }}>{t.theme}</span>
-              <span style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
-                {(["day", "night", "auto"] as Theme[]).map(themeKey => (
-                  <label key={themeKey} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
-                    <input type="radio" name="theme" value={themeKey} checked={settings.theme === themeKey}
-                      onChange={() => setSettings(s => ({ ...s, theme: themeKey }))} />
-                    {{ day: t.themeDay, night: t.themeNight, auto: t.themeAuto }[themeKey]}
-                  </label>
-                ))}
-                <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fgMuted, borderLeft: `1px solid ${p.fgVeryMuted}`, paddingLeft: "1rem", marginLeft: "0.25rem" }}>
-                  <input type="checkbox" checked={settings.soft}
-                    onChange={e => setSettings(s => ({ ...s, soft: e.target.checked }))} />
-                  {t.soft}
-                </label>
-              </span>
-            </label>
-
-            {/* 3. Sliders */}
-            <label style={lbl}>
-              <span style={{ width: 120 }}>{t.fontSize}</span>
-              <input data-testid="input-font-size" type="range" min={8} max={32} value={settings.fontSize}
-                onChange={e => setSettings(s => ({ ...s, fontSize: +e.target.value }))} style={{ flex: 1 }} />
-              <span style={{ width: 36, color: p.fgMuted }}>{settings.fontSize}px</span>
-            </label>
-
-            <label style={lbl}>
-              <span style={{ width: 120 }}>{t.rowSpacing}</span>
-              <input data-testid="input-row-spacing" type="range" min={1} max={32} value={settings.rowSpacing}
-                onChange={e => setSettings(s => ({ ...s, rowSpacing: +e.target.value }))} style={{ flex: 1 }} />
-              <span style={{ width: 36, color: p.fgMuted }}>{settings.rowSpacing}px</span>
-            </label>
-
-            <label style={lbl}>
-              <span style={{ width: 120 }}>{t.autoScroll}</span>
-              <input type="checkbox" checked={settings.autoScroll} onChange={event => {
-                if (!event.target.checked && revealScrollFrameRef.current !== null) {
-                  cancelAnimationFrame(revealScrollFrameRef.current);
-                  revealScrollFrameRef.current = null;
-                  revealScrollTargetRef.current = null;
-                }
-                setSettings(s => ({ ...s, autoScroll: event.target.checked }));
-              }} />
-            </label>
-
-            <label style={lbl}>
-              <span style={{ width: 120 }}>{t.showRevealButton}</span>
-              <input type="checkbox" checked={settings.showRevealButton}
-                onChange={event => setSettings(s => ({ ...s, showRevealButton: event.target.checked }))} />
-            </label>
-
-            <label style={lbl}>
-              <span style={{ width: 120 }}>{t.revealButtonSize}</span>
-              <input type="number" min={MIN_REVEAL_BUTTON_SIZE} max={MAX_REVEAL_BUTTON_SIZE} value={revealButtonSizeDraft}
-                onChange={event => setRevealButtonSizeDraft(event.target.value)}
-                onBlur={() => {
-                  const value = Number(revealButtonSizeDraft);
-                  const size = revealButtonSizeDraft.trim() && Number.isFinite(value)
-                    ? Math.round(Math.min(MAX_REVEAL_BUTTON_SIZE, Math.max(MIN_REVEAL_BUTTON_SIZE, value)))
-                    : settings.revealButtonSize;
-                  setRevealButtonSizeDraft(String(size));
-                  setSettings(s => ({ ...s, revealButtonSize: size }));
-                }}
-                style={{ width: 76, padding: "4px 6px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
-            </label>
-
-            {/* 4. Width (desktop only) */}
-            <label className="zw" style={lbl}>
-              <span style={{ width: 120 }}>{t.width}</span>
-              <input type="range" min={400} max={1400} step={20} value={settings.maxWidth}
-                onChange={e => setSettings(s => ({ ...s, maxWidth: +e.target.value }))} style={{ flex: 1 }} />
-              <span style={{ width: 36, color: p.fgMuted }}>{settings.maxWidth}</span>
-            </label>
-
-            {/* 5. Random order */}
+            {/* Frequently used controls */}
             <label style={lbl}>
               <span style={{ width: 120 }}>{t.randomOrder}</span>
               <input data-testid="input-randomize" type="checkbox" checked={settings.randomize}
@@ -1232,7 +1149,6 @@ export default function VocabPage() {
                 }} />
             </label>
 
-            {/* 5. Complexity filter */}
             <label style={lbl}>
               <span style={{ width: 120 }}>{t.complexityFilter}</span>
               <input data-testid="input-filter" type="range" min={0} max={Math.max(1, maxComplexity)} step={1} value={activeFilterLevel}
@@ -1241,24 +1157,109 @@ export default function VocabPage() {
               <span style={{ width: 36, color: activeFilterLevel > 0 ? p.fg : p.fgVeryMuted }}>{activeFilterLevel}</span>
             </label>
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 16, paddingTop: 4 }}>
-              <button type="button" onClick={exportData} style={lnk}>{t.exportData}</button>
-              <button type="button" onClick={() => importInputRef.current?.click()} style={lnk}>{t.importData}</button>
-              <input ref={importInputRef} type="file" accept=".json,application/json" hidden onChange={event => {
-                const input = event.currentTarget;
-                const file = input.files?.[0];
-                input.value = "";
-                if (file) void importData(file);
-              }} />
+            {/* Source data */}
+            <div>
+              <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>{t.wordListHint}</div>
+              <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(
+                lesson => ({ ...lesson, wordsText: text }),
+                withoutLessonFlags(text) !== withoutLessonFlags(wordsText),
+              )} onBlur={() => {}} p={p} maxHeight={220} />
             </div>
 
+            <details className="zs">
+              <summary style={{ cursor: "pointer", userSelect: "none", color: p.fgMuted }}>{t.detailedSettings}</summary>
+              <div style={{ paddingTop: "0.7rem", display: "flex", flexDirection: "column", gap: "0.7rem" }}>
+                <label style={lbl}>
+                  <span style={{ width: 120 }}>{t.theme}</span>
+                  <span style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+                    {(["day", "night", "auto"] as Theme[]).map(themeKey => (
+                      <label key={themeKey} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fg }}>
+                        <input type="radio" name="theme" value={themeKey} checked={settings.theme === themeKey}
+                          onChange={() => setSettings(s => ({ ...s, theme: themeKey }))} />
+                        {{ day: t.themeDay, night: t.themeNight, auto: t.themeAuto }[themeKey]}
+                      </label>
+                    ))}
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: p.fgMuted, borderLeft: `1px solid ${p.fgVeryMuted}`, paddingLeft: "1rem", marginLeft: "0.25rem" }}>
+                      <input type="checkbox" checked={settings.soft}
+                        onChange={e => setSettings(s => ({ ...s, soft: e.target.checked }))} />
+                      {t.soft}
+                    </label>
+                  </span>
+                </label>
+
+                <label style={lbl}>
+                  <span style={{ width: 120 }}>{t.fontSize}</span>
+                  <input data-testid="input-font-size" type="range" min={8} max={32} value={settings.fontSize}
+                    onChange={e => setSettings(s => ({ ...s, fontSize: +e.target.value }))} style={{ flex: 1 }} />
+                  <span style={{ width: 36, color: p.fgMuted }}>{settings.fontSize}px</span>
+                </label>
+
+                <label style={lbl}>
+                  <span style={{ width: 120 }}>{t.rowSpacing}</span>
+                  <input data-testid="input-row-spacing" type="range" min={1} max={32} value={settings.rowSpacing}
+                    onChange={e => setSettings(s => ({ ...s, rowSpacing: +e.target.value }))} style={{ flex: 1 }} />
+                  <span style={{ width: 36, color: p.fgMuted }}>{settings.rowSpacing}px</span>
+                </label>
+
+                <label style={lbl}>
+                  <span style={{ width: 120 }}>{t.autoScroll}</span>
+                  <input type="checkbox" checked={settings.autoScroll} onChange={event => {
+                    if (!event.target.checked && revealScrollFrameRef.current !== null) {
+                      cancelAnimationFrame(revealScrollFrameRef.current);
+                      revealScrollFrameRef.current = null;
+                      revealScrollTargetRef.current = null;
+                    }
+                    setSettings(s => ({ ...s, autoScroll: event.target.checked }));
+                  }} />
+                </label>
+
+                <label style={lbl}>
+                  <span style={{ width: 120 }}>{t.showRevealButton}</span>
+                  <input type="checkbox" checked={settings.showRevealButton}
+                    onChange={event => setSettings(s => ({ ...s, showRevealButton: event.target.checked }))} />
+                </label>
+
+                <label style={lbl}>
+                  <span style={{ width: 120 }}>{t.revealButtonSize}</span>
+                  <input type="number" min={MIN_REVEAL_BUTTON_SIZE} max={MAX_REVEAL_BUTTON_SIZE} value={revealButtonSizeDraft}
+                    onChange={event => setRevealButtonSizeDraft(event.target.value)}
+                    onBlur={() => {
+                      const value = Number(revealButtonSizeDraft);
+                      const size = revealButtonSizeDraft.trim() && Number.isFinite(value)
+                        ? Math.round(Math.min(MAX_REVEAL_BUTTON_SIZE, Math.max(MIN_REVEAL_BUTTON_SIZE, value)))
+                        : settings.revealButtonSize;
+                      setRevealButtonSizeDraft(String(size));
+                      setSettings(s => ({ ...s, revealButtonSize: size }));
+                    }}
+                    style={{ width: 76, padding: "4px 6px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+                </label>
+
+                <label className="zw" style={lbl}>
+                  <span style={{ width: 120 }}>{t.width}</span>
+                  <input type="range" min={400} max={1400} step={20} value={settings.maxWidth}
+                    onChange={e => setSettings(s => ({ ...s, maxWidth: +e.target.value }))} style={{ flex: 1 }} />
+                  <span style={{ width: 36, color: p.fgMuted }}>{settings.maxWidth}</span>
+                </label>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 16, paddingTop: 4 }}>
+                  <button type="button" onClick={exportData} style={lnk}>{t.exportData}</button>
+                  <button type="button" onClick={() => importInputRef.current?.click()} style={lnk}>{t.importData}</button>
+                  <input ref={importInputRef} type="file" accept=".json,application/json" hidden onChange={event => {
+                    const input = event.currentTarget;
+                    const file = input.files?.[0];
+                    input.value = "";
+                    if (file) void importData(file);
+                  }} />
+                </div>
+              </div>
+            </details>
           </div>
         </details>
 
         {/* Table */}
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: settings.fontSize }}>
           <thead>
-            <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: p.fgVeryMuted }}>
+            <tr style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: p.fg }}>
               <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingRight: "1em", lineHeight: 1 }}>{inverted ? secondLanguage : firstLanguage}</th>
               <th title={t.complexity} aria-label={t.complexity} style={{ width: Math.max(32, settings.fontSize * 1.4), textAlign: "center", fontWeight: "normal", paddingBottom: "0.5em", lineHeight: 1 }}>#</th>
               <th style={{ textAlign: "left", fontWeight: "normal", paddingBottom: "0.5em", paddingLeft: "1em", lineHeight: 1 }}>{inverted ? firstLanguage : secondLanguage}</th>
@@ -1269,27 +1270,24 @@ export default function VocabPage() {
               const count = word.complexity;
               const isRevealed = revealed.has(word.russian);
               const previousWord = displayWords[index - 1];
+              const startsNewGroup = Boolean(previousWord && previousWord.group !== word.group);
+              const borderTop = startsNewGroup ? `1px solid ${p.fgMuted}` : cell.borderTop;
               return (
-                <Fragment key={word.id}>
-                  {previousWord && previousWord.group !== word.group && <tr aria-hidden="true" data-testid={`separator-before-word-${word.id}`}>
-                    <td colSpan={3} style={{ padding: "4px 0", border: 0 }}><div style={{ height: 1, background: p.fgMuted }} /></td>
-                  </tr>}
-                  <tr data-testid={`row-word-${word.id}`}>
-                    <td style={{ ...cell, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>{inverted ? word.spanish : word.russian}</td>
-                    <td style={{ ...cell, textAlign: "center", padding: 0 }}>
-                      <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
-                    </td>
-                    <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
-                      style={{ ...cell, paddingLeft: "1em", cursor: "pointer", color: p.fg, overflowWrap: "anywhere" }}>
-                      <div className={`answer-reveal${isRevealed ? " is-open" : ""}`}>
-                        <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />
-                        <span className="answer-reveal__content" aria-hidden={!isRevealed}>
-                          {inverted ? word.russian : word.spanish}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                </Fragment>
+                <tr key={word.id} data-testid={`row-word-${word.id}`}>
+                  <td style={{ ...cell, borderTop, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>{inverted ? word.spanish : word.russian}</td>
+                  <td style={{ ...cell, borderTop, textAlign: "center", padding: 0 }}>
+                    <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
+                  </td>
+                  <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
+                    style={{ ...cell, borderTop, paddingLeft: "1em", cursor: "pointer", color: p.fg, overflowWrap: "anywhere" }}>
+                    <div className={`answer-reveal${isRevealed ? " is-open" : ""}`}>
+                      <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />
+                      <span className="answer-reveal__content" aria-hidden={!isRevealed}>
+                        {inverted ? word.russian : word.spanish}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
               );
             })}
           </tbody>
