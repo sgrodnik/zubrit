@@ -528,6 +528,7 @@ export default function VocabPage() {
   const revealButtonSize = Math.min(MAX_REVEAL_BUTTON_SIZE, Math.max(MIN_REVEAL_BUTTON_SIZE, settings.revealButtonSize));
   const [createLessonOpen, setCreateLessonOpen] = useState(false);
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [copyLesson, setCopyLesson] = useState(true);
   const [newLessonName, setNewLessonName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -1061,12 +1062,6 @@ export default function VocabPage() {
           </div>
         </div>
 
-        <div role="status" aria-live="polite" aria-label={`${revealedCount}/${totalCount} · ${pct}%`}
-          style={{ position: "sticky", top: 0, zIndex: 20, display: "flex", justifyContent: "flex-end", gap: 16, padding: "8px 0", marginBottom: "0.5rem", background: p.bg, color: p.fg, borderBottom: `1px solid ${p.divider}`, fontSize: 13 }}>
-          <span data-testid="vocab-progress-count">{revealedCount}/{totalCount}</span>
-          <span data-testid="vocab-progress-percent">{pct}%</span>
-        </div>
-
         {lessonDetailsOpen && <div role="dialog" aria-modal="true" aria-label={t.lessonDetails} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
           <form onSubmit={event => { event.preventDefault(); saveLessonName(); }} style={{ width: "min(480px, 100%)", maxHeight: "85vh", overflowY: "auto", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 14 }}>
             <strong>{t.lessonDetails}</strong>
@@ -1118,20 +1113,23 @@ export default function VocabPage() {
           </form>
         </div>}
 
-        {/* Settings spoiler row */}
-        <details className="zs" style={{ marginBottom: "1.25rem" }}>
-          <summary style={{ cursor: "pointer", userSelect: "none", fontSize: 13, color: p.fgMuted }}>
-            {/* Left: label + triangle */}
-            <span>{t.settings}</span>
-            {/* Right: controls — stop propagation so they don't toggle details */}
-            <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }} onClick={e => e.preventDefault()}>
-              <button data-testid="button-toggle-all" title={t.revealNextHint} onClick={toggleAll} style={{ ...lnk, color: p.fgMuted, fontSize: 13 }}>
-                {allRevealed ? t.hideAll : t.showAll}
-              </button>
-            </span>
-          </summary>
+        {/* Sticky settings / progress header */}
+        <div style={{ position: "sticky", top: 0, zIndex: 20, display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 12, padding: "8px 0", marginBottom: settingsOpen ? "0.5rem" : "1.25rem", background: p.bg, borderBottom: `1px solid ${p.divider}` }}>
+          <button type="button" aria-expanded={settingsOpen} aria-controls="vocab-settings-panel" onClick={() => setSettingsOpen(open => !open)}
+            style={{ background: "none", border: "none", padding: 0, justifySelf: "start", cursor: "pointer", color: p.fgMuted, fontSize: 13, textAlign: "left" }}>{t.settings}</button>
+          <div role="status" aria-live="polite" aria-label={`${revealedCount}/${totalCount} · ${pct}%`}
+            style={{ display: "flex", gap: 16, justifyContent: "center", color: p.fg, fontSize: 13 }}>
+            <span data-testid="vocab-progress-count">{revealedCount}/{totalCount}</span>
+            <span data-testid="vocab-progress-percent">{pct}%</span>
+          </div>
+          <button type="button" data-testid="button-toggle-all" title={t.revealNextHint} onClick={toggleAll}
+            style={{ ...lnk, justifySelf: "end", textDecoration: "none", color: p.fgMuted, fontSize: 13 }}>
+            {allRevealed ? t.hideAll : t.showAll}
+          </button>
+        </div>
 
-          <div style={{ paddingTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
+        <div id="vocab-settings-panel" hidden={!settingsOpen} style={{ marginBottom: "1.25rem" }}>
+          <div style={{ paddingTop: "0.4rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
             {/* Frequently used controls */}
             <label style={lbl}>
               <span style={{ width: 120 }}>{t.randomOrder}</span>
@@ -1254,7 +1252,7 @@ export default function VocabPage() {
               </div>
             </details>
           </div>
-        </details>
+        </div>
 
         {/* Table */}
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: settings.fontSize }}>
