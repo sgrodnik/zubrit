@@ -6,6 +6,9 @@ interface Word {
   spanish: string;
   complexity: number;
   group: number;
+  key?: string;
+  sourceLessonId?: string;
+  sourceLineId?: number;
 }
 
 const DEFAULT_WORDS_TEXT = [
@@ -30,6 +33,8 @@ const SETTINGS_KEY = "spanish-vocab-settings-v2";
 const WORDS_KEY = "spanish-vocab-words";
 const LESSONS_KEY = "spanish-vocab-lessons-v1";
 const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
+const COMPLEX_LESSON_ID = "__complex-words__";
+const COMPLEX_STUDY_KEY = "spanish-vocab-complex-study-v1";
 const REVEAL_BUTTON_POSITION_KEY = "spanish-vocab-reveal-button-position-v1";
 const DEFAULT_REVEAL_BUTTON_SIZE = 104;
 const MIN_REVEAL_BUTTON_SIZE = 48;
@@ -95,6 +100,15 @@ function splitStudyInterval(start: number, end: number): Array<{ date: string; m
     cursor = segmentEnd;
   }
   return intervals;
+}
+
+function loadComplexStudySeconds(): Record<string, number> {
+  try { return normalizeStudySeconds(JSON.parse(localStorage.getItem(COMPLEX_STUDY_KEY) ?? "{}")); }
+  catch { return {}; }
+}
+
+function wordIdentity(word: Word): string {
+  return word.key ?? word.russian;
 }
 
 function normalizeStudySeconds(value: any): Record<string, number> {
@@ -304,6 +318,7 @@ const LANGUAGES = {
     restartReveals: "Закрыть все строки и начать заново",
     dragToMove: "Перетащите, чтобы переместить",
     lesson: "Уроки",
+    complexLesson: "Сложные слова",
     size: "Размер",
     difficult: "сложных",
     activity: "Активность",
@@ -374,6 +389,7 @@ const LANGUAGES = {
     restartReveals: "Hide all answers and start again",
     dragToMove: "Drag to move",
     lesson: "Lessons",
+    complexLesson: "Difficult words",
     size: "Size",
     difficult: "difficult",
     activity: "Activity",
@@ -605,18 +621,43 @@ export default function VocabPage() {
   const requestedLessonId = lessonIdFromPath();
   const [lessonState, setLessonState] = useState<LessonState>(() => {
     const state = loadLessonState();
-    if (requestedLessonId && state.lessons.some(lesson => lesson.id === requestedLessonId)) state.activeId = requestedLessonId;
+    if (requestedLessonId && requestedLessonId !== COMPLEX_LESSON_ID && state.lessons.some(lesson => lesson.id === requestedLessonId)) state.activeId = requestedLessonId;
     return state;
   });
-  const [showHome, setShowHome] = useState(() => !requestedLessonId || !lessonState.lessons.some(lesson => lesson.id === requestedLessonId));
+  const requestedLessonExists = requestedLessonId === COMPLEX_LESSON_ID || Boolean(requestedLessonId && lessonState.lessons.some(lesson => lesson.id === requestedLessonId));
+  const [isComplexLesson, setIsComplexLesson] = useState(requestedLessonId === COMPLEX_LESSON_ID);
+  const [showHome, setShowHome] = useState(() => !requestedLessonExists);
   const lessonStateRef = useRef(lessonState);
   lessonStateRef.current = lessonState;
   const showHomeRef = useRef(showHome);
   showHomeRef.current = showHome;
   const activeLesson = lessonState.lessons.find(lesson => lesson.id === lessonState.activeId) ?? lessonState.lessons[0];
+  const [complexStudySecondsByDate, setComplexStudySecondsByDate] = useState<Record<string, number>>(loadComplexStudySeconds);
   const t = LANGUAGES[getLang()];
   const wordsText = activeLesson.wordsText;
-  const words = useMemo(() => parseWords(wordsText), [wordsText]);
+  const inverted = isInverted(wordsText);
+  const lessonWordsSignature = lessonState.lessons.map(lesson => `${lesson.id}\u0000${lesson.wordsText}`).join("\u0001");
+  const words = useMemo(() => {
+    if (!isComplexLesson) return parseWords(wordsText);
+    let nextId = 0;
+    let groupOffset = 0;
+    return [...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt).flatMap(lesson => {
+      const sourceWords = parseWords(lesson.wordsText);
+      const swapDirection = isInverted(lesson.wordsText) !== inverted;
+      const mapped = sourceWords.map(word => ({
+        ...word,
+        id: ++nextId,
+        russian: swapDirection ? word.spanish : word.russian,
+        spanish: swapDirection ? word.russian : word.spanish,
+        group: word.group + groupOffset,
+        key: `${lesson.id}:${word.id}`,
+        sourceLessonId: lesson.id,
+        sourceLineId: word.id,
+      }));
+      groupOffset += Math.max(0, ...sourceWords.map(word => word.group)) + 1;
+      return mapped;
+    });
+  }, [isComplexLesson, wordsText, inverted, lessonWordsSignature]);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -673,12 +714,19 @@ export default function VocabPage() {
     }
     tracker.accountedUntil = Math.max(tracker.accountedUntil, now);
     if (Object.keys(additions).length > 0) {
-      setLessonState(state => ({
-        ...state,
-        lessons: state.lessons.map(lesson => lesson.id === lessonId
-          ? { ...lesson, studySecondsByDate: { ...(lesson.studySecondsByDate ?? {}), ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (lesson.studySecondsByDate?.[date] ?? 0) + seconds])) } }
-          : lesson),
-      }));
+      if (lessonId === COMPLEX_LESSON_ID) {
+        setComplexStudySecondsByDate(current => ({
+          ...current,
+          ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (current[date] ?? 0) + seconds])),
+        }));
+      } else {
+        setLessonState(state => ({
+          ...state,
+          lessons: state.lessons.map(lesson => lesson.id === lessonId
+            ? { ...lesson, studySecondsByDate: { ...(lesson.studySecondsByDate ?? {}), ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (lesson.studySecondsByDate?.[date] ?? 0) + seconds])) } }
+            : lesson),
+        }));
+      }
     }
   }, []);
 
@@ -694,24 +742,33 @@ export default function VocabPage() {
   useEffect(() => { setRevealButtonSizeDraft(String(settings.revealButtonSize)); }, [settings.revealButtonSize]);
   useEffect(() => {
     localStorage.setItem(LESSONS_KEY, JSON.stringify({ lessons: lessonState.lessons }));
-    localStorage.setItem(ACTIVE_LESSON_KEY, lessonState.activeId);
-  }, [lessonState]);
+    localStorage.setItem(ACTIVE_LESSON_KEY, activeLesson.id);
+  }, [lessonState, activeLesson.id]);
+  useEffect(() => {
+    localStorage.setItem(COMPLEX_STUDY_KEY, JSON.stringify(complexStudySecondsByDate));
+  }, [complexStudySecondsByDate]);
 
   useEffect(() => {
     const syncRoute = () => {
       const lessonId = lessonIdFromPath();
       if (!lessonId) {
+        setIsComplexLesson(false);
         setShowHome(true);
+      } else if (lessonId === COMPLEX_LESSON_ID) {
+        setIsComplexLesson(true);
+        setShowHome(false);
       } else if (lessonStateRef.current.lessons.some(lesson => lesson.id === lessonId)) {
         setLessonState(state => ({ ...state, activeId: lessonId }));
+        setIsComplexLesson(false);
         setShowHome(false);
       } else {
         window.history.replaceState(null, "", homePath());
+        setIsComplexLesson(false);
         setShowHome(true);
       }
       setRevealed(new Set());
       setAllRevealed(false);
-      setFilterLevel(0);
+      setFilterLevel(lessonIdFromPath() === COMPLEX_LESSON_ID ? 1 : 0);
     };
     window.addEventListener("popstate", syncRoute);
     return () => window.removeEventListener("popstate", syncRoute);
@@ -776,16 +833,17 @@ export default function VocabPage() {
     tracker.accountedUntil = now;
   }, [showHome, accrueStudyTime]);
 
+  const activeStudyId = isComplexLesson ? COMPLEX_LESSON_ID : activeLesson.id;
   useEffect(() => {
     const tracker = activityRef.current;
-    if (tracker.lessonId === activeLesson.id) return;
+    if (tracker.lessonId === activeStudyId) return;
     const now = Date.now();
     const wasActive = tracker.visible && tracker.lastActivityAt > 0 && now - tracker.lastActivityAt <= IDLE_TIMEOUT_MS;
     accrueStudyTime(now);
-    tracker.lessonId = activeLesson.id;
+    tracker.lessonId = activeStudyId;
     tracker.accountedUntil = now;
     tracker.lastActivityAt = wasActive ? now : 0;
-  }, [activeLesson.id, accrueStudyTime]);
+  }, [activeStudyId, accrueStudyTime]);
 
   // Resolve active theme
   const [systemDark, setSystemDark] = useState(() =>
@@ -817,9 +875,9 @@ export default function VocabPage() {
   }, [words, settings.randomize]);
 
   // Filter — not persisted, resets on page reload
-  const [filterLevel, setFilterLevel] = useState(0);
+  const [filterLevel, setFilterLevel] = useState(isComplexLesson ? 1 : 0);
   const maxComplexity = useMemo(
-    () => Math.max(0, ...baseWords.map(word => word.complexity)),
+    () => Math.max(isComplexLesson ? 1 : 0, ...baseWords.map(word => word.complexity)),
     [baseWords]
   );
   const activeFilterLevel = Math.min(filterLevel, maxComplexity);
@@ -831,11 +889,11 @@ export default function VocabPage() {
     [baseWords, activeFilterLevel]
   );
 
-  const nextHiddenWord = displayWords.find(word => !revealed.has(word.russian));
+  const nextHiddenWord = displayWords.find(word => !revealed.has(wordIdentity(word)));
   const revealNext = useCallback(() => {
     if (!nextHiddenWord) return false;
-    setRevealed(previous => new Set(previous).add(nextHiddenWord.russian));
-    if (!displayWords.some(word => word.russian !== nextHiddenWord.russian && !revealed.has(word.russian))) setAllRevealed(true);
+    setRevealed(previous => new Set(previous).add(wordIdentity(nextHiddenWord)));
+    if (!displayWords.some(word => wordIdentity(word) !== wordIdentity(nextHiddenWord) && !revealed.has(wordIdentity(word)))) setAllRevealed(true);
     return true;
   }, [displayWords, nextHiddenWord, revealed]);
 
@@ -986,15 +1044,17 @@ export default function VocabPage() {
   const openLesson = (lessonId: string, replace = false) => {
     if (replace) window.history.replaceState(null, "", lessonPath(lessonId));
     else window.history.pushState(null, "", lessonPath(lessonId));
-    setLessonState(state => ({ ...state, activeId: lessonId }));
+    if (lessonId !== COMPLEX_LESSON_ID) setLessonState(state => ({ ...state, activeId: lessonId }));
+    setIsComplexLesson(lessonId === COMPLEX_LESSON_ID);
     setRevealed(new Set());
     setAllRevealed(false);
-    setFilterLevel(0);
+    setFilterLevel(lessonId === COMPLEX_LESSON_ID ? 1 : 0);
     setShowHome(false);
   };
 
   const openHome = () => {
     window.history.pushState(null, "", homePath());
+    setIsComplexLesson(false);
     setShowHome(true);
   };
 
@@ -1057,11 +1117,29 @@ export default function VocabPage() {
 
   const toggleAll = () => {
     if (allRevealed) { setRevealed(new Set()); }
-    else { setRevealed(new Set(displayWords.map(w => w.russian))); }
+    else { setRevealed(new Set(displayWords.map(wordIdentity))); }
     setAllRevealed(a => !a);
   };
 
   const changeTap = (lineId: string, change: (value: number) => number) => {
+    if (isComplexLesson) {
+      const sourceWord = words.find(word => wordIdentity(word) === lineId);
+      if (!sourceWord?.sourceLessonId || !sourceWord.sourceLineId) return;
+      setLessonState(state => ({
+        ...state,
+        lessons: state.lessons.map(lesson => {
+          if (lesson.id !== sourceWord.sourceLessonId) return lesson;
+          const currentWord = parseWords(lesson.wordsText).find(word => word.id === sourceWord.sourceLineId);
+          if (!currentWord) return lesson;
+          return {
+            ...lesson,
+            updatedAt: Date.now(),
+            wordsText: setLineComplexity(lesson.wordsText, sourceWord.sourceLineId!, Math.max(0, change(currentWord.complexity))),
+          };
+        }),
+      }));
+      return;
+    }
     const id = Number(lineId);
     updateActiveLesson(lesson => {
       const word = parseWords(lesson.wordsText).find(item => item.id === id);
@@ -1072,10 +1150,24 @@ export default function VocabPage() {
   const inc = (key: string) => changeTap(key, value => value + 1);
   const dec = (key: string) => changeTap(key, value => value - 1);
   const reset = (key: string) => changeTap(key, () => 0);
-  const resetAll = () => updateActiveLesson(lesson => ({
-    ...lesson,
-    wordsText: parseWords(lesson.wordsText).reduce((text, word) => setLineComplexity(text, word.id, 0), lesson.wordsText),
-  }));
+  const resetAll = () => {
+    if (isComplexLesson) {
+      const updatedAt = Date.now();
+      setLessonState(state => ({
+        ...state,
+        lessons: state.lessons.map(lesson => ({
+          ...lesson,
+          updatedAt,
+          wordsText: parseWords(lesson.wordsText).reduce((text, word) => setLineComplexity(text, word.id, 0), lesson.wordsText),
+        })),
+      }));
+      return;
+    }
+    updateActiveLesson(lesson => ({
+      ...lesson,
+      wordsText: parseWords(lesson.wordsText).reduce((text, word) => setLineComplexity(text, word.id, 0), lesson.wordsText),
+    }));
+  };
 
   const exportData = () => {
     const backup = {
@@ -1083,7 +1175,8 @@ export default function VocabPage() {
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
       lessons: lessonState.lessons,
-      activeLessonId: lessonState.activeId,
+      activeLessonId: activeLesson.id,
+      complexStudySecondsByDate,
       settings,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
@@ -1124,6 +1217,7 @@ export default function VocabPage() {
       if (!window.confirm(t.importConfirm)) return;
       const activeId = lessons.some(lesson => lesson.id === backup.activeLessonId) ? backup.activeLessonId : lessons[0].id;
       setLessonState({ lessons, activeId });
+      setComplexStudySecondsByDate(normalizeStudySeconds(backup.complexStudySecondsByDate));
       setSettings(normalizeSettings(backup.settings));
       setRevealed(new Set());
       setAllRevealed(false);
@@ -1146,14 +1240,13 @@ export default function VocabPage() {
   const lnk: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: 13, color: p.fg };
   const lbl: React.CSSProperties = { display: "flex", alignItems: "center", gap: "0.75rem", color: p.fg };
 
-  const revealedCount = displayWords.filter(w => revealed.has(w.russian)).length;
+  const revealedCount = displayWords.filter(word => revealed.has(wordIdentity(word))).length;
   const totalCount = displayWords.length;
   const pct = totalCount > 0 ? Math.round((revealedCount / totalCount) * 100) : 0;
 
   const languagePair = wordsText.match(/^\s*#lang\s+(\S+)\s+(.+?)\s*$/m);
   const firstLanguage = languagePair?.[1] ?? t.russian;
   const secondLanguage = languagePair?.[2] ?? t.spanish;
-  const inverted = isInverted(wordsText);
   const todayStudyDate = studyDateKey(Date.now());
   const sortedLessons = [...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt);
   const buttonOffersTop = settings.autoScroll && !isAtTop;
@@ -1162,6 +1255,14 @@ export default function VocabPage() {
   const revealButtonTitle = `${revealButtonLabel}${hasHiddenWords ? ` · ${t.revealNextHint}` : ""} · ${t.dragToMove}`;
 
   if (showHome) {
+    const allHomeWords = lessonState.lessons.flatMap(lesson => parseWords(lesson.wordsText));
+    const complexWordCount = allHomeWords.filter(word => word.complexity > 0).length;
+    const complexStudyEntries = Object.entries(complexStudySecondsByDate).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
+    const complexTotalMinutes = Math.round(complexStudyEntries.reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
+    const complexLastDate = complexStudyEntries.map(([date]) => date).sort().at(-1);
+    const complexRecency = complexLastDate
+      ? (() => { const days = daysBetweenDateKeys(complexLastDate, todayStudyDate); return days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`; })()
+      : "";
     return (
       <>
         <style>{`body { background: ${p.bg}; color: ${p.fg}; } .zc { padding: 1.5rem; padding-bottom: 24px; max-width: ${settings.maxWidth}px; margin: 0 auto; } @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; padding-bottom: 24px; } }`}</style>
@@ -1181,6 +1282,18 @@ export default function VocabPage() {
             if (file) void importData(file);
           }} />
           <div>
+            {allHomeWords.length > 0 && <button type="button" onClick={() => openLesson(COMPLEX_LESSON_ID)}
+              aria-label={`${t.complexLesson}. ${t.size} ${allHomeWords.length}${complexWordCount > 0 ? `, ${complexWordCount} ${t.difficult}` : ""}`}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 0", color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
+              <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
+                <span>{t.complexLesson}</span>
+                <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                  {t.size} {allHomeWords.length}{complexWordCount > 0 && `, ${complexWordCount} ${t.difficult}`} · {complexTotalMinutes} {t.minutesShort}
+                  {complexRecency && <> · {complexRecency}</>}
+                </span>
+              </span>
+              <ActivityHistogram studySecondsByDate={complexStudySecondsByDate} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
+            </button>}
             {sortedLessons.map((lesson, index) => {
               const lessonWords = parseWords(lesson.wordsText);
               const complexCount = lessonWords.filter(word => word.complexity > 0).length;
@@ -1253,7 +1366,7 @@ export default function VocabPage() {
 
       <div className="zc">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: "1rem" }}>
-          <select aria-label={t.lesson} value={activeLesson.id} onChange={event => {
+          <select aria-label={t.lesson} value={isComplexLesson ? COMPLEX_LESSON_ID : activeLesson.id} onChange={event => {
             if (event.target.value === "__home__") {
               openHome();
               return;
@@ -1261,11 +1374,12 @@ export default function VocabPage() {
             openLesson(event.target.value, true);
           }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
             <option value="__home__">{t.lesson}</option>
+            <option value={COMPLEX_LESSON_ID}>{t.complexLesson}</option>
             {sortedLessons.map((lesson, index) => <option key={lesson.id} value={lesson.id}>{sortedLessons.length - index}. {lesson.name} — {lessonStudySummary(lesson, todayStudyDate, t)}</option>)}
           </select>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {!isComplexLesson && <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button type="button" onClick={() => { setNewLessonName(activeLesson.name); setLessonDetailsOpen(true); }} style={lnk}>{t.details}</button>
-          </div>
+          </div>}
         </div>
 
         {lessonDetailsOpen && <div role="dialog" aria-modal="true" aria-label={t.lessonDetails} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
@@ -1343,7 +1457,7 @@ export default function VocabPage() {
                 onChange={e => handleRandomize(e.target.checked)} />
             </label>
 
-            <label style={lbl}>
+            {!isComplexLesson && <label style={lbl}>
               <span style={{ width: 120 }}>{t.reverseTranslation}</span>
               <input type="checkbox" checked={isInverted(wordsText)}
                 onChange={event => {
@@ -1351,7 +1465,7 @@ export default function VocabPage() {
                   setRevealed(new Set());
                   setAllRevealed(false);
                 }} />
-            </label>
+            </label>}
 
             <label style={lbl}>
               <span style={{ width: 120 }}>{t.complexityFilter}</span>
@@ -1361,14 +1475,16 @@ export default function VocabPage() {
               <span style={{ width: 36, color: activeFilterLevel > 0 ? p.fg : p.fgVeryMuted }}>{activeFilterLevel}</span>
             </label>
 
-            {/* Source data */}
-            <div>
-              <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>{t.wordListHint}</div>
-              <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(
-                lesson => ({ ...lesson, wordsText: text }),
-                withoutLessonFlags(text) !== withoutLessonFlags(wordsText),
-              )} onBlur={() => {}} p={p} maxHeight={220} />
-            </div>
+            {!isComplexLesson && <>
+              {/* Source data */}
+              <div>
+                <div style={{ marginBottom: "0.4rem", color: p.fgMuted }}>{t.wordListHint}</div>
+                <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(
+                  lesson => ({ ...lesson, wordsText: text }),
+                  withoutLessonFlags(text) !== withoutLessonFlags(wordsText),
+                )} onBlur={() => {}} p={p} maxHeight={220} />
+              </div>
+            </>}
 
             <details className="zs">
               <summary style={{ cursor: "pointer", userSelect: "none", color: p.fgMuted }}>{t.detailedSettings}</summary>
@@ -1463,7 +1579,7 @@ export default function VocabPage() {
           <tbody>
             {displayWords.map((word, index) => {
               const count = word.complexity;
-              const isRevealed = revealed.has(word.russian);
+              const isRevealed = revealed.has(wordIdentity(word));
               const previousWord = displayWords[index - 1];
               const startsNewGroup = Boolean(previousWord && previousWord.group !== word.group);
               const borderTop = startsNewGroup ? `1px solid ${p.fgMuted}` : cell.borderTop;
@@ -1471,9 +1587,9 @@ export default function VocabPage() {
                 <tr key={word.id} data-testid={`row-word-${word.id}`}>
                   <td style={{ ...cell, borderTop, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>{inverted ? word.spanish : word.russian}</td>
                   <td style={{ ...cell, borderTop, textAlign: "center", padding: 0 }}>
-                    <CounterCell rk={String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
+                    <CounterCell rk={word.key ?? String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
                   </td>
-                  <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(word.russian)}
+                  <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(wordIdentity(word))}
                     style={{ ...cell, borderTop, paddingLeft: "1em", cursor: "pointer", color: p.fg, overflowWrap: "anywhere" }}>
                     <div className={`answer-reveal${isRevealed ? " is-open" : ""}`}>
                       <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />
