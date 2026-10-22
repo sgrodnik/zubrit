@@ -1183,7 +1183,7 @@ export default function VocabPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `spanish-words-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `zubrit-backup-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(link);
     link.click();
     link.remove();
