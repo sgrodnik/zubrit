@@ -5,6 +5,7 @@ import NotFound from "@/pages/not-found";
 function Router() {
   return (
     <Switch>
+      <Route path="/lesson/:lessonId" component={VocabPage} />
       <Route path="/" component={VocabPage} />
       <Route component={NotFound} />
     </Switch>

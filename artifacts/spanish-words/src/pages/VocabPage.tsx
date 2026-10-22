@@ -120,15 +120,89 @@ function daysBetweenDateKeys(earlier: string, later: string): number {
   return Math.max(0, Math.round((Date.UTC(ly, lm - 1, ld) - Date.UTC(ey, em - 1, ed)) / 86_400_000));
 }
 
-function lessonStudySummary(lesson: Lesson, today: string, t: { minutesShort: string; noActivity: string; today: string; daysAgo: string }): string {
+function lessonStudySummary(lesson: Lesson, today: string, t: { minutesShort: string; today: string; yesterday: string; daysAgo: string }): string {
   const entries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
   const totalSeconds = entries.reduce((total, [, seconds]) => total + seconds, 0);
-  if (entries.length === 0) return `0 ${t.minutesShort} · ${t.noActivity}`;
+  if (entries.length === 0) return `0 ${t.minutesShort}`;
   const dates = entries.map(([date]) => date).sort();
   const lastDate = dates[dates.length - 1];
   const days = daysBetweenDateKeys(lastDate, today);
-  const recency = days === 0 ? t.today : `${days}${t.daysAgo}`;
+  const recency = days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`;
   return `${Math.round(totalSeconds / 60)} ${t.minutesShort} · ${recency}`;
+}
+
+function lessonIdFromPath(pathname = window.location.pathname): string | null {
+  const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const appPath = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
+  const match = appPath.match(/^\/lesson\/([^/]+)\/?$/);
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); }
+  catch { return null; }
+}
+
+function homePath(): string {
+  return import.meta.env.BASE_URL || "/";
+}
+
+function lessonPath(id: string): string {
+  return `${import.meta.env.BASE_URL.replace(/\/$/, "")}/lesson/${encodeURIComponent(id)}`;
+}
+
+function recentStudyDateKeys(today: string, count: number): string[] {
+  const [year, month, day] = today.split("-").map(Number);
+  const lastDate = new Date(year, month - 1, day, 12);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(lastDate);
+    date.setDate(lastDate.getDate() - (count - index - 1));
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  });
+}
+
+function ActivityHistogram({ studySecondsByDate, today, label, minutesShort, color, mutedColor }: {
+  studySecondsByDate: Record<string, number>;
+  today: string;
+  label: string;
+  minutesShort: string;
+  color: string;
+  mutedColor: string;
+}) {
+  const containerRef = useRef<HTMLSpanElement>(null);
+  const [dayCount, setDayCount] = useState(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const updateCount = () => setDayCount(Math.max(1, Math.floor((container.clientWidth + 2) / 5)));
+    updateCount();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateCount);
+      return () => window.removeEventListener("resize", updateCount);
+    }
+    const observer = new ResizeObserver(updateCount);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+  const days = recentStudyDateKeys(today, dayCount);
+  const secondsByDay = days.map(date => {
+    const seconds = studySecondsByDate[date] ?? 0;
+    return seconds > MIN_VISIBLE_STUDY_SECONDS ? seconds : 0;
+  });
+  const maxSeconds = Math.max(0, ...secondsByDay);
+  return (
+    <span ref={containerRef} role="img" aria-label={label} style={{ display: "flex", alignItems: "end", gap: 2, height: 24, width: "100%", marginTop: 7, overflow: "hidden" }}>
+      {secondsByDay.map((seconds, index) => {
+        const date = new Date(`${days[index]}T12:00:00`);
+        const weekday = date.getDay();
+        const isWeekend = weekday === 0 || weekday === 6;
+        const isLastDayOfMonth = date.getDate() === new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+        return (
+          <span key={days[index]} title={`${days[index]} · ${Math.round(seconds / 60)} ${minutesShort}`} style={{ position: "relative", flex: "0 0 3px", height: 24 }}>
+            <span style={{ position: "absolute", top: `${isLastDayOfMonth ? 20 : 0}%`, right: 0, bottom: `${isWeekend ? 20 : 0}%`, left: 0, background: mutedColor, opacity: 0.15 }} />
+            {seconds > 0 && <span style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: Math.max(3, Math.round((seconds / maxSeconds) * 22)), background: color, opacity: 0.5 }} />}
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 function suggestedLessonName(previousName: string): string {
@@ -203,6 +277,8 @@ const LANGUAGES = {
     resetAll: "Сбросить все",
     exportData: "Экспорт данных",
     importData: "Импорт данных",
+    exportShort: "Экспорт",
+    importShort: "Импорт",
     lessonDetails: "Детали урока",
     details: "Детали",
     deleteLesson: "Удалить",
@@ -216,7 +292,8 @@ const LANGUAGES = {
     save: "Сохранить",
     close: "Закрыть",
     today: "сегодня",
-    daysAgo: "д назад",
+    yesterday: "вчера",
+    daysAgo: "дн. назад",
     noActivity: "нет активности",
     revealNextHint: "Пробел: открыть следующую строку",
     revealNext: "Открыть следующую строку",
@@ -226,7 +303,10 @@ const LANGUAGES = {
     scrollToTop: "Прокрутить наверх",
     restartReveals: "Закрыть все строки и начать заново",
     dragToMove: "Перетащите, чтобы переместить",
-    lesson: "Урок",
+    lesson: "Уроки",
+    size: "Размер",
+    difficult: "сложных",
+    activity: "Активность",
     newLesson: "Новый урок",
     lessonNamePlaceholder: "Название урока",
     copyLesson: "Скопировать слова и сложность текущего урока",
@@ -267,6 +347,8 @@ const LANGUAGES = {
     resetAll: "Reset all",
     exportData: "Export data",
     importData: "Import data",
+    exportShort: "Export",
+    importShort: "Import",
     lessonDetails: "Lesson details",
     details: "Details",
     deleteLesson: "Delete",
@@ -280,6 +362,7 @@ const LANGUAGES = {
     save: "Save",
     close: "Close",
     today: "today",
+    yesterday: "yesterday",
     daysAgo: "d ago",
     noActivity: "no activity",
     revealNextHint: "Space: reveal the next row",
@@ -290,7 +373,10 @@ const LANGUAGES = {
     scrollToTop: "Scroll to top",
     restartReveals: "Hide all answers and start again",
     dragToMove: "Drag to move",
-    lesson: "Lesson",
+    lesson: "Lessons",
+    size: "Size",
+    difficult: "difficult",
+    activity: "Activity",
     newLesson: "New lesson",
     lessonNamePlaceholder: "Lesson name",
     copyLesson: "Copy words and complexity from the current lesson",
@@ -516,7 +602,17 @@ function CounterCell({ rk, count, onInc, onDec, onReset, onResetAll, rowPadding,
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function VocabPage() {
-  const [lessonState, setLessonState] = useState<LessonState>(loadLessonState);
+  const requestedLessonId = lessonIdFromPath();
+  const [lessonState, setLessonState] = useState<LessonState>(() => {
+    const state = loadLessonState();
+    if (requestedLessonId && state.lessons.some(lesson => lesson.id === requestedLessonId)) state.activeId = requestedLessonId;
+    return state;
+  });
+  const [showHome, setShowHome] = useState(() => !requestedLessonId || !lessonState.lessons.some(lesson => lesson.id === requestedLessonId));
+  const lessonStateRef = useRef(lessonState);
+  lessonStateRef.current = lessonState;
+  const showHomeRef = useRef(showHome);
+  showHomeRef.current = showHome;
   const activeLesson = lessonState.lessons.find(lesson => lesson.id === lessonState.activeId) ?? lessonState.lessons[0];
   const t = LANGUAGES[getLang()];
   const wordsText = activeLesson.wordsText;
@@ -588,7 +684,7 @@ export default function VocabPage() {
 
   const recordActivity = useCallback(() => {
     const tracker = activityRef.current;
-    if (!tracker.visible || document.visibilityState !== "visible") return;
+    if (showHomeRef.current || !tracker.visible || document.visibilityState !== "visible") return;
     const now = Date.now();
     accrueStudyTime(now);
     tracker.lastActivityAt = now;
@@ -600,6 +696,26 @@ export default function VocabPage() {
     localStorage.setItem(LESSONS_KEY, JSON.stringify({ lessons: lessonState.lessons }));
     localStorage.setItem(ACTIVE_LESSON_KEY, lessonState.activeId);
   }, [lessonState]);
+
+  useEffect(() => {
+    const syncRoute = () => {
+      const lessonId = lessonIdFromPath();
+      if (!lessonId) {
+        setShowHome(true);
+      } else if (lessonStateRef.current.lessons.some(lesson => lesson.id === lessonId)) {
+        setLessonState(state => ({ ...state, activeId: lessonId }));
+        setShowHome(false);
+      } else {
+        window.history.replaceState(null, "", homePath());
+        setShowHome(true);
+      }
+      setRevealed(new Set());
+      setAllRevealed(false);
+      setFilterLevel(0);
+    };
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
+  }, []);
   useEffect(() => { saveSettings(settings); }, [settings]);
 
   useEffect(() => {
@@ -650,6 +766,15 @@ export default function VocabPage() {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, [accrueStudyTime, recordActivity]);
+
+  useEffect(() => {
+    if (!showHome) return;
+    const tracker = activityRef.current;
+    const now = Date.now();
+    accrueStudyTime(now);
+    tracker.lastActivityAt = 0;
+    tracker.accountedUntil = now;
+  }, [showHome, accrueStudyTime]);
 
   useEffect(() => {
     const tracker = activityRef.current;
@@ -858,6 +983,21 @@ export default function VocabPage() {
     return () => document.removeEventListener("keydown", onShortcut);
   }, [createLessonOpen, lessonDetailsOpen]);
 
+  const openLesson = (lessonId: string, replace = false) => {
+    if (replace) window.history.replaceState(null, "", lessonPath(lessonId));
+    else window.history.pushState(null, "", lessonPath(lessonId));
+    setLessonState(state => ({ ...state, activeId: lessonId }));
+    setRevealed(new Set());
+    setAllRevealed(false);
+    setFilterLevel(0);
+    setShowHome(false);
+  };
+
+  const openHome = () => {
+    window.history.pushState(null, "", homePath());
+    setShowHome(true);
+  };
+
   const updateActiveLesson = (update: (lesson: Lesson) => Lesson, updateTimestamp = true) => {
     setLessonState(state => ({
       ...state,
@@ -880,6 +1020,7 @@ export default function VocabPage() {
       studySecondsByDate: {},
     };
     setLessonState(state => ({ lessons: [...state.lessons, lesson], activeId: lesson.id }));
+    openLesson(lesson.id);
     setNewLessonName("");
     setCopyLesson(true);
     setCreateLessonOpen(false);
@@ -1020,6 +1161,70 @@ export default function VocabPage() {
   const revealButtonIcon = hasHiddenWords ? "↓" : buttonOffersTop ? "↑" : "↻";
   const revealButtonTitle = `${revealButtonLabel}${hasHiddenWords ? ` · ${t.revealNextHint}` : ""} · ${t.dragToMove}`;
 
+  if (showHome) {
+    return (
+      <>
+        <style>{`body { background: ${p.bg}; color: ${p.fg}; } .zc { padding: 1.5rem; padding-bottom: 24px; max-width: ${settings.maxWidth}px; margin: 0 auto; } @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; padding-bottom: 24px; } }`}</style>
+        <main className="zc">
+          <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: "1rem" }}>
+            <span style={{ fontSize: 13, color: p.fgMuted }}>{t.lesson}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, whiteSpace: "nowrap" }}>
+              <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ {t.newLesson}</button>
+              <button type="button" onClick={() => importInputRef.current?.click()} style={lnk}>{t.importShort}</button>
+              <button type="button" onClick={exportData} style={lnk}>{t.exportShort}</button>
+            </div>
+          </header>
+          <input ref={importInputRef} type="file" accept=".json,application/json" hidden onChange={event => {
+            const input = event.currentTarget;
+            const file = input.files?.[0];
+            input.value = "";
+            if (file) void importData(file);
+          }} />
+          <div>
+            {sortedLessons.map((lesson, index) => {
+              const lessonWords = parseWords(lesson.wordsText);
+              const complexCount = lessonWords.filter(word => word.complexity > 0).length;
+              const studyEntries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
+              const totalMinutes = Math.round(studyEntries.reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
+              const lastDate = studyEntries.map(([date]) => date).sort().at(-1);
+              let recency = "";
+              if (lastDate) {
+                const days = daysBetweenDateKeys(lastDate, todayStudyDate);
+                recency = days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`;
+              }
+              return (
+                <button key={lesson.id} type="button" onClick={() => {
+                  openLesson(lesson.id);
+                }} aria-label={`${lesson.name}. ${t.size} ${lessonWords.length}${complexCount > 0 ? `, ${complexCount} ${t.difficult}` : ""}`}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 0", color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
+                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
+                    <span>{sortedLessons.length - index}. {lesson.name}</span>
+                    <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                      {t.size} {lessonWords.length}{complexCount > 0 && `, ${complexCount} ${t.difficult}`}{" · "}{totalMinutes} {t.minutesShort}
+                      {recency && <> · {recency}</>}
+                    </span>
+                  </span>
+                  <ActivityHistogram studySecondsByDate={lesson.studySecondsByDate ?? {}} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
+                </button>
+              );
+            })}
+          </div>
+        </main>
+        {createLessonOpen && <div role="dialog" aria-modal="true" aria-label={t.newLesson} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
+          <form onSubmit={event => { event.preventDefault(); createLesson(); }} style={{ width: "min(360px, 100%)", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 12 }}>
+            <strong>{t.newLesson}</strong>
+            <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} placeholder={t.lessonNamePlaceholder} required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={copyLesson} onChange={event => setCopyLesson(event.target.checked)} />{t.copyLesson}</label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button type="button" onClick={() => setCreateLessonOpen(false)} style={lnk}>{t.cancel}</button>
+              <button type="submit" style={lnk}>{t.create}</button>
+            </div>
+          </form>
+        </div>}
+      </>
+    );
+  }
+
   return (
     <>
       <style>{`
@@ -1049,15 +1254,16 @@ export default function VocabPage() {
       <div className="zc">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: "1rem" }}>
           <select aria-label={t.lesson} value={activeLesson.id} onChange={event => {
-            setLessonState(state => ({ ...state, activeId: event.target.value }));
-            setRevealed(new Set());
-            setAllRevealed(false);
-            setFilterLevel(0);
+            if (event.target.value === "__home__") {
+              openHome();
+              return;
+            }
+            openLesson(event.target.value, true);
           }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
+            <option value="__home__">{t.lesson}</option>
             {sortedLessons.map((lesson, index) => <option key={lesson.id} value={lesson.id}>{sortedLessons.length - index}. {lesson.name} — {lessonStudySummary(lesson, todayStudyDate, t)}</option>)}
           </select>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button type="button" onClick={() => { setNewLessonName(suggestedLessonName(activeLesson.name)); setCreateLessonOpen(true); }} style={lnk}>+ {t.newLesson}</button>
             <button type="button" onClick={() => { setNewLessonName(activeLesson.name); setLessonDetailsOpen(true); }} style={lnk}>{t.details}</button>
           </div>
         </div>
@@ -1239,16 +1445,7 @@ export default function VocabPage() {
                   <span style={{ width: 36, color: p.fgMuted }}>{settings.maxWidth}</span>
                 </label>
 
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 16, paddingTop: 4 }}>
-                  <button type="button" onClick={exportData} style={lnk}>{t.exportData}</button>
-                  <button type="button" onClick={() => importInputRef.current?.click()} style={lnk}>{t.importData}</button>
-                  <input ref={importInputRef} type="file" accept=".json,application/json" hidden onChange={event => {
-                    const input = event.currentTarget;
-                    const file = input.files?.[0];
-                    input.value = "";
-                    if (file) void importData(file);
-                  }} />
-                </div>
+
               </div>
             </details>
           </div>
