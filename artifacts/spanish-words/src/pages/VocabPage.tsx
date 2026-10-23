@@ -123,6 +123,14 @@ function formatStudyDate(dateKey: string, locale: string): string {
   return new Date(year, month - 1, day, 12).toLocaleDateString(locale);
 }
 
+function formatStudyDateWithWeekday(dateKey: string, locale: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12);
+  const weekday = date.toLocaleDateString(locale, { weekday: "short" }).replace(/\.$/, "");
+  const monthName = date.toLocaleDateString(locale, { month: "short" }).replace(/\.$/, "");
+  return `${weekday} ${String(day).padStart(2, "0")} ${monthName}`;
+}
+
 function formatDateTime(timestamp: number, locale: string): string {
   return new Date(timestamp).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
 }
@@ -216,6 +224,59 @@ function ActivityHistogram({ studySecondsByDate, today, label, minutesShort, col
         );
       })}
     </span>
+  );
+}
+
+function DailyTotalsHistogram({ studySecondsByDate, lessonCreatedOnDates, today, label, minutesShort, lessonCreatedLabel, locale, color, mutedColor, dotColor, backgroundColor }: {
+  studySecondsByDate: Record<string, number>;
+  lessonCreatedOnDates: ReadonlySet<string>;
+  today: string;
+  label: string;
+  minutesShort: string;
+  lessonCreatedLabel: string;
+  locale: string;
+  color: string;
+  mutedColor: string;
+  dotColor: string;
+  backgroundColor: string;
+}) {
+  const days = recentStudyDateKeys(today, 30);
+  const [selectedDate, setSelectedDate] = useState(today);
+  useEffect(() => setSelectedDate(today), [today]);
+  const secondsByDay = days.map(date => studySecondsByDate[date] ?? 0);
+  const maxSeconds = Math.max(0, ...secondsByDay);
+  const selectedSeconds = studySecondsByDate[selectedDate] ?? 0;
+  const selectedDateLabel = formatStudyDateWithWeekday(selectedDate, locale);
+
+  return (
+    <>
+      <div role="group" aria-label={label} style={{ display: "flex", alignItems: "end", gap: 2, height: 52, width: "100%", marginTop: 7 }}>
+        {days.map((date, index) => {
+          const seconds = secondsByDay[index];
+          const dateObject = new Date(`${date}T12:00:00`);
+          const weekday = dateObject.getDay();
+          const isWeekend = weekday === 0 || weekday === 6;
+          const isLastDayOfMonth = dateObject.getDate() === new Date(dateObject.getFullYear(), dateObject.getMonth() + 1, 0).getDate();
+          const isSelected = date === selectedDate;
+          const hasCreatedLesson = lessonCreatedOnDates.has(date);
+          const dateLabel = formatStudyDateWithWeekday(date, locale);
+          const minutes = Math.round(seconds / 60);
+          const accessibleLabel = `${dateLabel} · ${minutes} ${minutesShort}${hasCreatedLesson ? ` · ${lessonCreatedLabel}` : ""}`;
+          return (
+            <button key={date} type="button" aria-label={accessibleLabel} aria-pressed={isSelected}
+              title={accessibleLabel} onClick={() => setSelectedDate(date)}
+              style={{ position: "relative", flex: "1 1 0", minWidth: 0, height: 52, padding: 0, border: 0, borderRadius: 2, overflow: "hidden", background: "transparent", outline: isSelected ? `1px solid ${color}` : "none", cursor: "pointer" }}>
+              <span aria-hidden="true" style={{ position: "absolute", top: `${isLastDayOfMonth ? 20 : 0}%`, right: 0, bottom: `${isWeekend ? 20 : 0}%`, left: 0, background: mutedColor, opacity: 0.15 }} />
+              {seconds > MIN_VISIBLE_STUDY_SECONDS && <span aria-hidden="true" style={{ position: "absolute", right: 0, bottom: 0, left: 0, height: `${Math.max(6, (seconds / maxSeconds) * 46)}px`, background: color, opacity: isSelected ? 0.85 : 0.55 }} />}
+              {hasCreatedLesson && <span aria-hidden="true" style={{ position: "absolute", zIndex: 1, top: "50%", left: "50%", width: 4, height: 4, borderRadius: "50%", background: dotColor, boxShadow: `0 0 0 1px ${backgroundColor}`, transform: "translate(-50%, -50%)" }} />}
+            </button>
+          );
+        })}
+      </div>
+      <div aria-live="polite" style={{ marginTop: 6, minHeight: 18, color: color, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+        {selectedDateLabel} · {Math.round(selectedSeconds / 60)} {minutesShort}{lessonCreatedOnDates.has(selectedDate) && ` · ${lessonCreatedLabel}`}
+      </div>
+    </>
   );
 }
 
@@ -322,6 +383,8 @@ const LANGUAGES = {
     size: "Размер",
     difficult: "сложных",
     activity: "Активность",
+    last30Days: "Последние 30 дней",
+    lessonCreated: "создан урок",
     newLesson: "Новый урок",
     lessonNamePlaceholder: "Название урока",
     copyLesson: "Скопировать слова и сложность текущего урока",
@@ -393,6 +456,8 @@ const LANGUAGES = {
     size: "Size",
     difficult: "difficult",
     activity: "Activity",
+    last30Days: "Last 30 days",
+    lessonCreated: "lesson created",
     newLesson: "New lesson",
     lessonNamePlaceholder: "Lesson name",
     copyLesson: "Copy words and complexity from the current lesson",
@@ -1248,6 +1313,16 @@ export default function VocabPage() {
   const firstLanguage = languagePair?.[1] ?? t.russian;
   const secondLanguage = languagePair?.[2] ?? t.spanish;
   const todayStudyDate = studyDateKey(Date.now());
+  const allStudySecondsByDate = useMemo(() => {
+    const totals = { ...complexStudySecondsByDate };
+    for (const lesson of lessonState.lessons) {
+      for (const [date, seconds] of Object.entries(lesson.studySecondsByDate ?? {})) {
+        totals[date] = (totals[date] ?? 0) + seconds;
+      }
+    }
+    return totals;
+  }, [lessonState.lessons, complexStudySecondsByDate]);
+  const lessonCreatedOnDates = useMemo(() => new Set(lessonState.lessons.map(lesson => studyDateKey(lesson.createdAt))), [lessonState.lessons]);
   const sortedLessons = [...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt);
   const buttonOffersTop = settings.autoScroll && !isAtTop;
   const revealButtonLabel = hasHiddenWords ? t.revealNext : buttonOffersTop ? t.scrollToTop : t.restartReveals;
@@ -1281,6 +1356,10 @@ export default function VocabPage() {
             input.value = "";
             if (file) void importData(file);
           }} />
+          <section style={{ marginBottom: 18 }}>
+            <div style={{ color: p.fgMuted, fontSize: 12 }}>{t.activity} · {t.last30Days}</div>
+            <DailyTotalsHistogram studySecondsByDate={allStudySecondsByDate} lessonCreatedOnDates={lessonCreatedOnDates} today={todayStudyDate} label={`${t.activity} · ${t.last30Days}`} minutesShort={t.minutesShort} lessonCreatedLabel={t.lessonCreated} locale={getLang() === "ru" ? "ru-RU" : "en-US"} color={p.fgMuted} mutedColor={p.fgVeryMuted} dotColor={p.fg} backgroundColor={p.bg} />
+          </section>
           <div>
             {allHomeWords.length > 0 && <button type="button" onClick={() => openLesson(COMPLEX_LESSON_ID)}
               aria-label={`${t.complexLesson}. ${t.size} ${allHomeWords.length}${complexWordCount > 0 ? `, ${complexWordCount} ${t.difficult}` : ""}`}
