@@ -925,19 +925,24 @@ export default function VocabPage() {
   const baseP = isDark ? DARK : LIGHT;
   const p = settings.soft ? softenPalette(baseP, isDark) : baseP;
 
+  const wordOrderSignature = JSON.stringify(words.map(word => [word.key ?? word.id, word.russian, word.spanish, word.group]));
+
   const handleRandomize = (val: boolean) => {
     if (val) setShuffledWords(shuffleWithinGroups(words));
     setSettings(s => ({ ...s, randomize: val }));
   };
 
-  const baseWords = useMemo(
-    () => settings.randomize ? shuffledWords : words,
-    [settings.randomize, shuffledWords, words]
-  );
+  const baseWords = useMemo(() => {
+    if (!settings.randomize) return words;
+    const wordsByOrderKey = new Map(words.map(word => [word.key ?? word.id, word]));
+    return shuffledWords
+      .map(word => wordsByOrderKey.get(word.key ?? word.id))
+      .filter((word): word is Word => word !== undefined);
+  }, [settings.randomize, shuffledWords, words]);
 
   useEffect(() => {
     if (settings.randomize) setShuffledWords(shuffleWithinGroups(words));
-  }, [words, settings.randomize]);
+  }, [wordOrderSignature, settings.randomize]);
 
   // Filter — not persisted, resets on page reload
   const [filterLevel, setFilterLevel] = useState(isComplexLesson ? 1 : 0);
