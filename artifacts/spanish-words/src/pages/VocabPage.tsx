@@ -1,44 +1,15 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import changelogMarkdown from "../../../../CHANGELOG.md?raw";
+import type { Lesson, LessonState, Word } from "../features/lessons/types";
+import { isInverted, normalizeStudySeconds, parseWords, setInverted, setLineComplexity, withoutLessonFlags } from "../features/lessons/model";
+import { loadLessonState, saveLessonState } from "../features/lessons/localStorage";
 
 const CHANGELOG_ENTRIES = changelogMarkdown.split("\n").flatMap(line => {
   const match = line.match(/^- \*\*(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?)\*\* · \*\*(\d{4}-\d{2}-\d{2})\*\* — (.+)$/);
   return match ? [{ version: match[1], date: match[2], description: match[3] }] : [];
 });
 
-interface Word {
-  id: number;
-  russian: string;
-  spanish: string;
-  complexity: number;
-  group: number;
-  key?: string;
-  sourceLessonId?: string;
-  sourceLineId?: number;
-}
-
-const DEFAULT_WORDS_TEXT = [
-  "#lang Русский Испанский",
-  "Привет\tHola",
-  "Доброе утро\tBuenos días",
-  "Пожалуйста\tPor favor",
-  "Спасибо\tGracias",
-  "Да\tSí",
-  "Нет\tNo",
-  "Я не понимаю\tNo entiendo\t1",
-  "Вы говорите по-английски?\t¿Habla inglés?\t1",
-  "Сколько это стоит?\t¿Cuánto cuesta?\t1",
-  "Где находится туалет?\t¿Dónde está el baño?\t2",
-  "Я хочу кофе, пожалуйста.\tQuiero un café, por favor.\t2",
-  "Счёт, пожалуйста.\tLa cuenta, por favor.",
-  "До свидания\tHasta luego",
-].join("\n");
-
-const TAPS_KEY = "spanish-vocab-taps-v2";
 const SETTINGS_KEY = "spanish-vocab-settings-v2";
-const WORDS_KEY = "spanish-vocab-words";
-const LESSONS_KEY = "spanish-vocab-lessons-v1";
-const ACTIVE_LESSON_KEY = "spanish-vocab-active-lesson-v1";
 const COMPLEX_LESSON_ID = "__complex-words__";
 const COMPLEX_STUDY_KEY = "spanish-vocab-complex-study-v1";
 const REVEAL_BUTTON_POSITION_KEY = "spanish-vocab-reveal-button-position-v1";
@@ -51,42 +22,6 @@ const BACKUP_VERSION = 1;
 const IDLE_TIMEOUT_MS = 10_000;
 const MIN_VISIBLE_STUDY_SECONDS = 30;
 const REVEAL_TRANSITION_MS = 180;
-
-type Lesson = { id: string; name: string; wordsText: string; randomize: boolean; createdAt: number; updatedAt: number; studySecondsByDate: Record<string, number> };
-type LessonState = { lessons: Lesson[]; activeId: string };
-
-function setLineComplexity(text: string, lineId: number, complexity: number): string {
-  const lines = text.split("\n");
-  const index = lineId - 1;
-  if (index < 0 || index >= lines.length) return text;
-  const content = lines[index].replace(/\t\d+\s*$/, "");
-  lines[index] = complexity > 0 ? `${content}\t${complexity}` : content;
-  return lines.join("\n");
-}
-
-function isInverted(text: string): boolean {
-  return /^\s*#i\s*$/m.test(text);
-}
-
-function setInverted(text: string, inverted: boolean): string {
-  const lines = text.split(/\r?\n/).filter(line => !/^\s*#i\s*$/.test(line));
-  if (inverted) {
-    const languageDirective = lines.findIndex(line => /^\s*#lang\b/i.test(line));
-    lines.splice(languageDirective >= 0 ? languageDirective + 1 : 0, 0, "#i");
-  }
-  return lines.join("\n");
-}
-
-function withoutLessonFlags(text: string): string {
-  return text.split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join("\n");
-}
-
-function mergeLegacyTaps(text: string, taps: Record<string, number>): string {
-  return parseWords(text).reduce((result, word) => {
-    const score = taps[word.russian] ?? 0;
-    return score > 0 && word.complexity === 0 ? setLineComplexity(result, word.id, score) : result;
-  }, text);
-}
 
 function studyDateKey(timestamp: number): string {
   const date = new Date(timestamp);
@@ -115,13 +50,6 @@ function loadComplexStudySeconds(): Record<string, number> {
 
 function wordIdentity(word: Word): string {
   return word.key ?? word.russian;
-}
-
-function normalizeStudySeconds(value: any): Record<string, number> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.fromEntries(Object.entries(value).filter(([date, seconds]) =>
-    /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(seconds) && (seconds as number) > 0
-  )) as Record<string, number>;
 }
 
 function formatStudyDate(dateKey: string, locale: string): string {
@@ -292,46 +220,6 @@ function suggestedLessonName(previousName: string): string {
   return `${date} ${previousName}`;
 }
 
-function loadLessonState(): LessonState {
-  try {
-    const saved = JSON.parse(localStorage.getItem(LESSONS_KEY) ?? "null");
-    if (saved?.lessons?.length) {
-      let legacyInverted = false;
-      try { legacyInverted = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").reverseTranslation === true; } catch { /* ignore malformed settings */ }
-      const lessons: Lesson[] = saved.lessons.map((lesson: any) => {
-        let wordsText = mergeLegacyTaps(lesson.wordsText ?? "", lesson.taps ?? {});
-        if (legacyInverted && !isInverted(wordsText)) wordsText = setInverted(wordsText, true);
-        return {
-          id: lesson.id,
-          name: lesson.name,
-          wordsText,
-          randomize: lesson.randomize === true,
-          createdAt: lesson.createdAt ?? Date.now(),
-          updatedAt: lesson.updatedAt ?? Date.now(),
-          studySecondsByDate: normalizeStudySeconds(lesson.studySecondsByDate),
-        };
-      });
-      const activeId = localStorage.getItem(ACTIVE_LESSON_KEY);
-      return { lessons, activeId: lessons.some(lesson => lesson.id === activeId) ? activeId! : lessons[0].id };
-    }
-  } catch { /* migrate legacy storage below */ }
-  const now = Date.now();
-  let wordsText = mergeLegacyTaps(localStorage.getItem(WORDS_KEY) ?? DEFAULT_WORDS_TEXT, loadTaps());
-  try {
-    if (JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").reverseTranslation === true) wordsText = setInverted(wordsText, true);
-  } catch { /* ignore malformed settings */ }
-  const lesson: Lesson = {
-    id: `lesson-${now}`,
-    name: getLang() === "ru" ? "Пример — поездка" : "Sample — travel",
-    wordsText,
-    randomize: false,
-    createdAt: now,
-    updatedAt: now,
-    studySecondsByDate: {},
-  };
-  return { lessons: [lesson], activeId: lesson.id };
-}
-
 const LANGUAGES = {
   ru: {
     settings: "Настройки",
@@ -493,10 +381,6 @@ const LANGUAGES = {
 
 const getLang = () => (typeof navigator !== "undefined" && navigator.language.startsWith("ru")) ? "ru" : "en";
 
-function loadTaps(): Record<string, number> {
-  try { return JSON.parse(localStorage.getItem(TAPS_KEY) ?? "{}"); }
-  catch { return {}; }
-}
 type Theme = "day" | "night" | "auto";
 type ComplexSort = "original" | "easy" | "hard";
 interface Settings { fontSize: number; rowSpacing: number; complexRandomize: boolean; complexSort: ComplexSort; theme: Theme; soft: boolean; maxWidth: number; autoScroll: boolean; showRevealButton: boolean; revealButtonSize: number; }
@@ -524,35 +408,6 @@ function loadSettings(): Settings {
   catch { return normalizeSettings(null); }
 }
 function saveSettings(s: Settings) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
-
-function parseWords(text: string): Word[] {
-  const words: Word[] = [];
-  let group = 0;
-  let separatorPending = false;
-  for (const [index, rawLine] of text.split("\n").entries()) {
-    const line = rawLine.trim();
-    if (!line) {
-      if (words.length > 0) separatorPending = true;
-      continue;
-    }
-    const content = line.replace(/\t\d+\s*$/, "");
-    let parts: string[] = [];
-    if (content.includes("\t")) parts = content.split("\t");
-    else if (content.includes(" — ")) parts = content.split(" — ");
-    else if (content.includes(" - ")) parts = content.split(" - ");
-    else continue;
-    const russian = parts[0]?.trim();
-    const spanish = parts[1]?.trim();
-    const complexity = Number(line.match(/\t(\d+)\s*$/)?.[1] ?? 0);
-    if (!russian || !spanish) continue;
-    if (separatorPending) {
-      group++;
-      separatorPending = false;
-    }
-    words.push({ id: index + 1, russian, spanish, complexity, group });
-  }
-  return words;
-}
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -828,10 +683,7 @@ export default function VocabPage() {
   }, [accrueStudyTime]);
 
   useEffect(() => { setRevealButtonSizeDraft(String(settings.revealButtonSize)); }, [settings.revealButtonSize]);
-  useEffect(() => {
-    localStorage.setItem(LESSONS_KEY, JSON.stringify({ lessons: lessonState.lessons }));
-    localStorage.setItem(ACTIVE_LESSON_KEY, activeLesson.id);
-  }, [lessonState, activeLesson.id]);
+  useEffect(() => { saveLessonState({ ...lessonState, activeId: activeLesson.id }); }, [lessonState, activeLesson.id]);
   useEffect(() => {
     localStorage.setItem(COMPLEX_STUDY_KEY, JSON.stringify(complexStudySecondsByDate));
   }, [complexStudySecondsByDate]);
