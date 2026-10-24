@@ -733,7 +733,7 @@ export default function VocabPage() {
   const [createLessonOpen, setCreateLessonOpen] = useState(false);
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [copyLesson, setCopyLesson] = useState(true);
+  const [copyLesson, setCopyLesson] = useState(false);
   const [newLessonName, setNewLessonName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
   const studyRemaindersRef = useRef<Record<string, number>>({});
