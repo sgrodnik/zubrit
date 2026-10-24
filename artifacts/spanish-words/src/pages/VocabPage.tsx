@@ -1,4 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import changelogMarkdown from "../../../../CHANGELOG.md?raw";
+
+const CHANGELOG_ENTRIES = changelogMarkdown.split("\n").flatMap(line => {
+  const match = line.match(/^- \*\*(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?)\*\* · \*\*(\d{4}-\d{2}-\d{2})\*\* — (.+)$/);
+  return match ? [{ version: match[1], date: match[2], description: match[3] }] : [];
+});
 
 interface Word {
   id: number;
@@ -744,6 +750,7 @@ export default function VocabPage() {
   const revealButtonSize = Math.min(MAX_REVEAL_BUTTON_SIZE, Math.max(MIN_REVEAL_BUTTON_SIZE, settings.revealButtonSize));
   const [createLessonOpen, setCreateLessonOpen] = useState(false);
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copyLesson, setCopyLesson] = useState(false);
   const [newLessonName, setNewLessonName] = useState("");
@@ -1372,7 +1379,7 @@ export default function VocabPage() {
       : "";
     return (
       <>
-        <style>{`body { background: ${p.bg}; color: ${p.fg}; } .zc { padding: 1.5rem; padding-bottom: 24px; max-width: ${settings.maxWidth}px; margin: 0 auto; } @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; padding-bottom: 24px; } }`}</style>
+        <style>{`body { background: ${p.bg}; color: ${p.fg}; } .zc { padding: 1.5rem; padding-bottom: calc(56px + env(safe-area-inset-bottom)); max-width: ${settings.maxWidth}px; margin: 0 auto; } @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; padding-bottom: calc(56px + env(safe-area-inset-bottom)); } } .changelog-bar { transition: opacity 180ms ease, transform 180ms ease; } @media (prefers-reduced-motion: reduce) { .changelog-bar { transition: none; } }`}</style>
         <main className="zc">
           <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: "1rem" }}>
             <span style={{ fontSize: 13, color: p.fgMuted }}>{t.lesson}</span>
@@ -1435,6 +1442,33 @@ export default function VocabPage() {
             })}
           </div>
         </main>
+        {CHANGELOG_ENTRIES.length > 0 && <div className="changelog-bar" aria-hidden={!isAtTop} style={{ position: "fixed", zIndex: 50, right: 0, bottom: 0, left: 0, paddingBottom: "env(safe-area-inset-bottom)", background: p.bg, borderTop: `1px solid ${p.fgVeryMuted}`, opacity: isAtTop ? 1 : 0, transform: isAtTop ? "translateY(0)" : "translateY(100%)", pointerEvents: isAtTop ? "auto" : "none" }}>
+          <div style={{ maxWidth: settings.maxWidth, margin: "0 auto", padding: "1px 0.5rem" }}>
+            <button type="button" disabled={!isAtTop} onClick={() => setChangelogOpen(true)} title={`${CHANGELOG_ENTRIES[0].version} · ${CHANGELOG_ENTRIES[0].date} — ${CHANGELOG_ENTRIES[0].description}`}
+              aria-label={`Open changelog. Latest version ${CHANGELOG_ENTRIES[0].version}, ${CHANGELOG_ENTRIES[0].date}: ${CHANGELOG_ENTRIES[0].description}`}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minHeight: 22, padding: 0, border: 0, background: "transparent", color: p.fg, textAlign: "left", cursor: "pointer", fontSize: 14 }}>
+              <span style={{ flex: "0 0 auto", color: p.fgMuted, fontVariantNumeric: "tabular-nums" }}>{CHANGELOG_ENTRIES[0].version}</span>
+              <time dateTime={CHANGELOG_ENTRIES[0].date} style={{ flex: "0 0 auto", color: p.fgMuted, fontVariantNumeric: "tabular-nums" }}>{CHANGELOG_ENTRIES[0].date}</time>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CHANGELOG_ENTRIES[0].description}</span>
+            </button>
+          </div>
+        </div>}
+        {changelogOpen && <div role="dialog" aria-modal="true" aria-labelledby="changelog-title" onClick={event => { if (event.target === event.currentTarget) setChangelogOpen(false); }} onKeyDown={event => { if (event.key === "Escape") setChangelogOpen(false); }}
+          style={{ position: "fixed", inset: 0, zIndex: 100, overflowY: "auto", background: p.bg, color: p.fg, padding: "24px 16px" }}>
+          <section style={{ width: "min(640px, 100%)", margin: "0 auto" }}>
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 24 }}>
+              <h2 id="changelog-title" style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Changelog</h2>
+              <button type="button" autoFocus onClick={() => setChangelogOpen(false)} style={{ ...lnk, color: p.fgMuted }}>Close</button>
+            </header>
+            <ol style={{ display: "grid", gap: 16, margin: 0, padding: 0, listStyle: "none" }}>
+              {CHANGELOG_ENTRIES.map(entry => <li key={entry.version} style={{ display: "grid", gridTemplateColumns: "max-content max-content 1fr", gap: "4px 12px", fontSize: 14, lineHeight: 1.5 }}>
+                <span style={{ color: p.fgMuted, fontVariantNumeric: "tabular-nums" }}>{entry.version}</span>
+                <time dateTime={entry.date} style={{ color: p.fgMuted, fontVariantNumeric: "tabular-nums" }}>{entry.date}</time>
+                <span>{entry.description}</span>
+              </li>)}
+            </ol>
+          </section>
+        </div>}
         {createLessonOpen && <div role="dialog" aria-modal="true" aria-label={t.newLesson} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
           <form onSubmit={event => { event.preventDefault(); createLesson(); }} style={{ width: "min(360px, 100%)", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 12 }}>
             <strong>{t.newLesson}</strong>
