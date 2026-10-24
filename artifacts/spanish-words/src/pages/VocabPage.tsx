@@ -342,6 +342,10 @@ const LANGUAGES = {
     rowSpacing: "Интервал строк",
     width: "Ширина",
     randomOrder: "Случайный порядок",
+    complexSort: "Порядок слов",
+    sortOriginal: "Оригинал",
+    sortEasy: "Сначала лёгкие",
+    sortHard: "Сначала сложные",
     reverseTranslation: "Обратный перевод",
     complexityFilter: "Сложность ≥",
     russian: "Русский",
@@ -415,6 +419,10 @@ const LANGUAGES = {
     rowSpacing: "Row spacing",
     width: "Width",
     randomOrder: "Random order",
+    complexSort: "Word order",
+    sortOriginal: "Original",
+    sortEasy: "Easiest first",
+    sortHard: "Hardest first",
     reverseTranslation: "Reverse translation",
     complexityFilter: "Complexity ≥",
     russian: "Russian",
@@ -482,7 +490,8 @@ function loadTaps(): Record<string, number> {
   catch { return {}; }
 }
 type Theme = "day" | "night" | "auto";
-interface Settings { fontSize: number; rowSpacing: number; complexRandomize: boolean; theme: Theme; soft: boolean; maxWidth: number; autoScroll: boolean; showRevealButton: boolean; revealButtonSize: number; }
+type ComplexSort = "original" | "easy" | "hard";
+interface Settings { fontSize: number; rowSpacing: number; complexRandomize: boolean; complexSort: ComplexSort; theme: Theme; soft: boolean; maxWidth: number; autoScroll: boolean; showRevealButton: boolean; revealButtonSize: number; }
 
 function normalizeSettings(value: any): Settings {
   const p = value && typeof value === "object" ? value : {};
@@ -492,6 +501,7 @@ function normalizeSettings(value: any): Settings {
     fontSize: Number.isFinite(p.fontSize) ? p.fontSize : 14,
     rowSpacing: Number.isFinite(p.rowSpacing) ? p.rowSpacing : 8,
     complexRandomize: typeof p.complexRandomize === "boolean" ? p.complexRandomize : false,
+    complexSort: p.complexSort === "easy" || p.complexSort === "hard" ? p.complexSort : "original",
     theme,
     soft: typeof p.soft === "boolean" ? p.soft : true,
     maxWidth: Number.isFinite(p.maxWidth) ? p.maxWidth : 680,
@@ -959,9 +969,17 @@ export default function VocabPage() {
   useEffect(() => {
     if (filterLevel > maxComplexity) setFilterLevel(maxComplexity);
   }, [filterLevel, maxComplexity]);
+  const orderedWords = useMemo(() => {
+    if (!isComplexLesson || randomize || settings.complexSort === "original") return baseWords;
+    const direction = settings.complexSort === "easy" ? 1 : -1;
+    return baseWords
+      .map((word, index) => ({ word, index }))
+      .sort((a, b) => direction * (a.word.complexity - b.word.complexity) || a.index - b.index)
+      .map(({ word }) => word);
+  }, [baseWords, isComplexLesson, randomize, settings.complexSort]);
   const displayWords = useMemo(
-    () => activeFilterLevel === 0 ? baseWords : baseWords.filter(word => word.complexity >= activeFilterLevel),
-    [baseWords, activeFilterLevel]
+    () => activeFilterLevel === 0 ? orderedWords : orderedWords.filter(word => word.complexity >= activeFilterLevel),
+    [orderedWords, activeFilterLevel]
   );
 
   const nextHiddenWord = displayWords.find(word => !revealed.has(wordIdentity(word)));
@@ -1547,6 +1565,23 @@ export default function VocabPage() {
               <input data-testid="input-randomize" type="checkbox" checked={randomize}
                 onChange={e => handleRandomize(e.target.checked)} />
             </label>
+
+            {isComplexLesson && <div style={{ ...lbl, alignItems: "flex-start" }}>
+              <span style={{ width: 120 }}>{t.complexSort}</span>
+              <div role="radiogroup" aria-label={t.complexSort} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {([
+                  ["original", t.sortOriginal],
+                  ["easy", t.sortEasy],
+                  ["hard", t.sortHard],
+                ] as [ComplexSort, string][]).map(([sort, label]) => (
+                  <label key={sort} style={{ display: "flex", alignItems: "center", gap: 4, cursor: randomize ? "default" : "pointer", color: randomize ? p.fgVeryMuted : p.fg }}>
+                    <input type="radio" name="complex-sort" value={sort} checked={settings.complexSort === sort}
+                      disabled={randomize} onChange={() => setSettings(current => ({ ...current, complexSort: sort }))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>}
 
             {!isComplexLesson && <label style={lbl}>
               <span style={{ width: 120 }}>{t.reverseTranslation}</span>
