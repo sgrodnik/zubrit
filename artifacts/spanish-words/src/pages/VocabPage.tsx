@@ -46,7 +46,7 @@ const IDLE_TIMEOUT_MS = 10_000;
 const MIN_VISIBLE_STUDY_SECONDS = 30;
 const REVEAL_TRANSITION_MS = 180;
 
-type Lesson = { id: string; name: string; wordsText: string; createdAt: number; updatedAt: number; studySecondsByDate: Record<string, number> };
+type Lesson = { id: string; name: string; wordsText: string; randomize: boolean; createdAt: number; updatedAt: number; studySecondsByDate: Record<string, number> };
 type LessonState = { lessons: Lesson[]; activeId: string };
 
 function setLineComplexity(text: string, lineId: number, complexity: number): string {
@@ -299,6 +299,7 @@ function loadLessonState(): LessonState {
           id: lesson.id,
           name: lesson.name,
           wordsText,
+          randomize: lesson.randomize === true,
           createdAt: lesson.createdAt ?? Date.now(),
           updatedAt: lesson.updatedAt ?? Date.now(),
           studySecondsByDate: normalizeStudySeconds(lesson.studySecondsByDate),
@@ -317,6 +318,7 @@ function loadLessonState(): LessonState {
     id: `lesson-${now}`,
     name: getLang() === "ru" ? "Пример — поездка" : "Sample — travel",
     wordsText,
+    randomize: false,
     createdAt: now,
     updatedAt: now,
     studySecondsByDate: {},
@@ -480,7 +482,7 @@ function loadTaps(): Record<string, number> {
   catch { return {}; }
 }
 type Theme = "day" | "night" | "auto";
-interface Settings { fontSize: number; rowSpacing: number; randomize: boolean; theme: Theme; soft: boolean; maxWidth: number; autoScroll: boolean; showRevealButton: boolean; revealButtonSize: number; }
+interface Settings { fontSize: number; rowSpacing: number; complexRandomize: boolean; theme: Theme; soft: boolean; maxWidth: number; autoScroll: boolean; showRevealButton: boolean; revealButtonSize: number; }
 
 function normalizeSettings(value: any): Settings {
   const p = value && typeof value === "object" ? value : {};
@@ -489,7 +491,7 @@ function normalizeSettings(value: any): Settings {
   return {
     fontSize: Number.isFinite(p.fontSize) ? p.fontSize : 14,
     rowSpacing: Number.isFinite(p.rowSpacing) ? p.rowSpacing : 8,
-    randomize: typeof p.randomize === "boolean" ? p.randomize : false,
+    complexRandomize: typeof p.complexRandomize === "boolean" ? p.complexRandomize : false,
     theme,
     soft: typeof p.soft === "boolean" ? p.soft : true,
     maxWidth: Number.isFinite(p.maxWidth) ? p.maxWidth : 680,
@@ -741,8 +743,10 @@ export default function VocabPage() {
     accountedUntil: Date.now(),
     visible: typeof document === "undefined" || document.visibilityState === "visible",
   });
+  const randomize = isComplexLesson ? settings.complexRandomize : activeLesson.randomize;
+  const randomOrderContext = isComplexLesson ? COMPLEX_LESSON_ID : activeLesson.id;
   const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
-    settings.randomize ? shuffleWithinGroups(words) : []
+    randomize ? shuffleWithinGroups(words) : []
   );
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [allRevealed, setAllRevealed] = useState(false);
@@ -929,20 +933,21 @@ export default function VocabPage() {
 
   const handleRandomize = (val: boolean) => {
     if (val) setShuffledWords(shuffleWithinGroups(words));
-    setSettings(s => ({ ...s, randomize: val }));
+    if (isComplexLesson) setSettings(s => ({ ...s, complexRandomize: val }));
+    else updateActiveLesson(lesson => ({ ...lesson, randomize: val }), false);
   };
 
   const baseWords = useMemo(() => {
-    if (!settings.randomize) return words;
+    if (!randomize) return words;
     const wordsByOrderKey = new Map(words.map(word => [word.key ?? word.id, word]));
     return shuffledWords
       .map(word => wordsByOrderKey.get(word.key ?? word.id))
       .filter((word): word is Word => word !== undefined);
-  }, [settings.randomize, shuffledWords, words]);
+  }, [randomize, shuffledWords, words]);
 
   useEffect(() => {
-    if (settings.randomize) setShuffledWords(shuffleWithinGroups(words));
-  }, [wordOrderSignature, settings.randomize]);
+    if (randomize) setShuffledWords(shuffleWithinGroups(words));
+  }, [wordOrderSignature, randomize, randomOrderContext]);
 
   // Filter — not persisted, resets on page reload
   const [filterLevel, setFilterLevel] = useState(isComplexLesson ? 1 : 0);
@@ -1145,6 +1150,7 @@ export default function VocabPage() {
       id: `lesson-${now}-${Math.random().toString(36).slice(2, 8)}`,
       name,
       wordsText: copyLesson ? activeLesson.wordsText : "",
+      randomize: copyLesson ? activeLesson.randomize : false,
       createdAt: now,
       updatedAt: now,
       studySecondsByDate: {},
@@ -1279,6 +1285,7 @@ export default function VocabPage() {
           id,
           name: item.name,
           wordsText: item.wordsText,
+          randomize: item.randomize === true,
           createdAt: Number.isFinite(item.createdAt) ? item.createdAt : now,
           updatedAt: Number.isFinite(item.updatedAt) ? item.updatedAt : now,
           studySecondsByDate: normalizeStudySeconds(item.studySecondsByDate),
@@ -1537,7 +1544,7 @@ export default function VocabPage() {
             {/* Frequently used controls */}
             <label style={lbl}>
               <span style={{ width: 120 }}>{t.randomOrder}</span>
-              <input data-testid="input-randomize" type="checkbox" checked={settings.randomize}
+              <input data-testid="input-randomize" type="checkbox" checked={randomize}
                 onChange={e => handleRandomize(e.target.checked)} />
             </label>
 
