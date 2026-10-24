@@ -386,8 +386,9 @@ const LANGUAGES = {
     dragToMove: "Перетащите, чтобы переместить",
     lesson: "Уроки",
     complexLesson: "Сложные слова",
-    size: "Размер",
+    size: "Объём",
     difficult: "сложных",
+    total: "Общее",
     activity: "Активность",
     last30Days: "Последние 30 дней",
     lessonCreated: "создан урок",
@@ -465,6 +466,7 @@ const LANGUAGES = {
     complexLesson: "Difficult words",
     size: "Size",
     difficult: "difficult",
+    total: "Total",
     activity: "Activity",
     last30Days: "Last 30 days",
     lessonCreated: "lesson created",
@@ -1392,13 +1394,13 @@ export default function VocabPage() {
           </section>
           <div>
             {allHomeWords.length > 0 && <button type="button" onClick={() => openLesson(COMPLEX_LESSON_ID)}
-              aria-label={`${t.complexLesson}. ${t.size} ${allHomeWords.length}${complexWordCount > 0 ? `, ${complexWordCount} ${t.difficult}` : ""}`}
+              aria-label={`${t.complexLesson}. ${t.size} ${allHomeWords.length} (${complexWordCount})`}
               style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 0", color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
               <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
                 <span>{t.complexLesson}</span>
                 <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                  {t.size} {allHomeWords.length}{complexWordCount > 0 && `, ${complexWordCount} ${t.difficult}`} · {complexTotalMinutes} {t.minutesShort}
-                  {complexRecency && <> · {complexRecency}</>}
+                  {t.size} {allHomeWords.length} ({complexWordCount}) · {t.total} {complexTotalMinutes} {t.minutesShort}
+                  {complexRecency && <> · {complexRecency} {Math.round((complexStudySecondsByDate[complexLastDate!] ?? 0) / 60)} {t.minutesShort}</>}
                 </span>
               </span>
               <ActivityHistogram studySecondsByDate={complexStudySecondsByDate} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
@@ -1409,6 +1411,7 @@ export default function VocabPage() {
               const studyEntries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
               const totalMinutes = Math.round(studyEntries.reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
               const lastDate = studyEntries.map(([date]) => date).sort().at(-1);
+              const lastDayMinutes = lastDate ? Math.round((lesson.studySecondsByDate?.[lastDate] ?? 0) / 60) : 0;
               let recency = "";
               if (lastDate) {
                 const days = daysBetweenDateKeys(lastDate, todayStudyDate);
@@ -1417,13 +1420,13 @@ export default function VocabPage() {
               return (
                 <button key={lesson.id} type="button" onClick={() => {
                   openLesson(lesson.id);
-                }} aria-label={`${lesson.name}. ${t.size} ${lessonWords.length}${complexCount > 0 ? `, ${complexCount} ${t.difficult}` : ""}`}
+                }} aria-label={`${lesson.name}. ${t.size} ${lessonWords.length} (${complexCount})`}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 0", color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
                   <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
                     <span>{sortedLessons.length - index}. {lesson.name}</span>
                     <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                      {t.size} {lessonWords.length}{complexCount > 0 && `, ${complexCount} ${t.difficult}`}{" · "}{totalMinutes} {t.minutesShort}
-                      {recency && <> · {recency}</>}
+                      {t.size} {lessonWords.length} ({complexCount}) · {t.total} {totalMinutes} {t.minutesShort}
+                      {recency && <> · {recency} {lastDayMinutes} {t.minutesShort}</>}
                     </span>
                   </span>
                   <ActivityHistogram studySecondsByDate={lesson.studySecondsByDate ?? {}} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
