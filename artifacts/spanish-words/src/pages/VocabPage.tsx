@@ -1037,7 +1037,6 @@ export default function VocabPage() {
     setLessonState(state => ({ lessons: [...state.lessons, lesson], activeId: lesson.id }));
     openLesson(lesson.id);
     setNewLessonName("");
-    setCopyLesson(true);
     setCreateLessonOpen(false);
     setRevealed(new Set());
     setFilterLevel(0);

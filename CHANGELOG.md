@@ -2,7 +2,7 @@
 
 Versions are assigned to grouped milestones; small fixes and follow-up tweaks are included with the related entry. Entries are ordered newest first.
 
-- **v0.9** · **2026-10-24** — Improved lesson statistics, added sorting for complex words, and introduced a compact home-screen changelog. Random order is preserved when difficulty changes and stored per lesson; lesson copying is off by default.
+- **v0.9** · **2026-10-24** — Improved lesson statistics, added sorting for complex words, and introduced a compact home-screen changelog. Random order is preserved when difficulty changes and stored per lesson; lesson copying is off by default; the checkbox retains the user's choice.
 - **v0.8** · **2026-10-23** — Added lesson creation dates to the activity chart.
 - **v0.7** · **2026-10-22** — Added a lesson dashboard with activity charts, lesson statistics, and browser navigation. Added a virtual lesson for difficult words.
 - **v0.6** · **2026-10-20** — Added visual separators for word groups and reorganized settings. Progress and key controls now stay visible while scrolling.
