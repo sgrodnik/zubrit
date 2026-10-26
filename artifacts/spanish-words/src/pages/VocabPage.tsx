@@ -472,12 +472,11 @@ function softenPalette(base: Palette, dark: boolean): Palette {
 }
 
 // ── Numbered textarea ─────────────────────────────────────────────────────────
-function NumberedTextarea({ value, onChange, onBlur, p, maxHeight }: {
-  value: string; onChange: (v: string) => void; onBlur: (v: string) => void; p: Palette; maxHeight?: number;
+function NumberedTextarea({ value, onChange, onBlur, onReveal, sourceRevealed, p, maxHeight }: {
+  value: string; onChange: (v: string) => void; onBlur: (v: string) => void; onReveal: () => void; sourceRevealed: boolean; p: Palette; maxHeight?: number;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const numRef = useRef<HTMLDivElement>(null);
-  const [sourceRevealed, setSourceRevealed] = useState(false);
   const lines = value.split("\n").length;
   const syncScroll = () => {
     if (taRef.current && numRef.current) numRef.current.scrollTop = taRef.current.scrollTop;
@@ -492,7 +491,7 @@ function NumberedTextarea({ value, onChange, onBlur, p, maxHeight }: {
         data-testid="input-words"
         value={value}
         onChange={e => onChange(e.target.value)}
-        onFocus={() => setSourceRevealed(true)}
+        onFocus={onReveal}
         onBlur={e => onBlur(e.target.value)}
         onScroll={syncScroll}
         style={{ flex: 1, padding: "4px 6px", fontSize: 12, fontFamily: "monospace", lineHeight: "1.5", border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: p.bg, color: p.fg, height: maxHeight ?? "auto", overflowY: "auto", filter: sourceRevealed ? undefined : "blur(5px)" }}
@@ -607,6 +606,7 @@ export default function VocabPage() {
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sourceRevealed, setSourceRevealed] = useState(false);
   const [copyLesson, setCopyLesson] = useState(false);
   const [newLessonName, setNewLessonName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -706,6 +706,8 @@ export default function VocabPage() {
         setIsComplexLesson(false);
         setShowHome(true);
       }
+      setSettingsOpen(false);
+      setSourceRevealed(false);
       setRevealed(new Set());
       setAllRevealed(false);
       setFilterLevel(lessonIdFromPath() === COMPLEX_LESSON_ID ? 1 : 0);
@@ -914,6 +916,7 @@ export default function VocabPage() {
     } else if (settings.autoScroll && scrollYRef.current > 1) {
       animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
     } else {
+      if (randomize) setShuffledWords(shuffleWithinGroups(words));
       setRevealed(new Set());
       setAllRevealed(false);
     }
@@ -996,6 +999,8 @@ export default function VocabPage() {
   }, [createLessonOpen, lessonDetailsOpen]);
 
   const openLesson = (lessonId: string, replace = false) => {
+    setSettingsOpen(false);
+    setSourceRevealed(false);
     if (replace) window.history.replaceState(null, "", lessonPath(lessonId));
     else window.history.pushState(null, "", lessonPath(lessonId));
     if (lessonId !== COMPLEX_LESSON_ID) setLessonState(state => ({ ...state, activeId: lessonId }));
@@ -1007,6 +1012,8 @@ export default function VocabPage() {
   };
 
   const openHome = () => {
+    setSettingsOpen(false);
+    setSourceRevealed(false);
     window.history.pushState(null, "", homePath());
     setIsComplexLesson(false);
     setShowHome(true);
@@ -1040,6 +1047,8 @@ export default function VocabPage() {
     setCreateLessonOpen(false);
     setRevealed(new Set());
     setFilterLevel(0);
+    setSettingsOpen(true);
+    setSourceRevealed(true);
   };
 
   const saveLessonName = () => {
@@ -1496,7 +1505,7 @@ export default function VocabPage() {
                 <NumberedTextarea value={wordsText} onChange={text => updateActiveLesson(
                   lesson => ({ ...lesson, wordsText: text }),
                   withoutLessonFlags(text) !== withoutLessonFlags(wordsText),
-                )} onBlur={() => {}} p={p} maxHeight={220} />
+                )} onBlur={() => {}} onReveal={() => setSourceRevealed(true)} sourceRevealed={sourceRevealed} p={p} maxHeight={220} />
               </div>
             </>}
 
