@@ -1097,7 +1097,7 @@ export default function VocabPage() {
     if (name !== activeLesson.name) {
       setLessonState(state => ({
         ...state,
-        lessons: state.lessons.map(lesson => lesson.id === state.activeId ? { ...lesson, name, updatedAt: Date.now() } : lesson),
+        lessons: state.lessons.map(lesson => lesson.id === state.activeId ? { ...lesson, name } : lesson),
       }));
     }
     setNewLessonName(name);
