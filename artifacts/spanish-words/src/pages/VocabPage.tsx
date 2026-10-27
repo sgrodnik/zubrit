@@ -556,7 +556,7 @@ function LessonCard({ lesson, rank, today, now, t, p, onClick, padding = "10px 0
         <span style={{ minWidth: 0, flex: "1 1 auto", lineHeight: 1.2, marginBottom: "-1.2em", position: "relative", zIndex: 1, overflowWrap: "anywhere" }}>{rank}. {lesson.name}</span>
         <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
           {t.size} {lessonWords.length} ({complexCount}) · {t.total} {totalMinutes} {t.minutesShort}
-          {recency && <> · {recency} {lastDayMinutes} {t.minutesShort}</>}
+          {recency && <> · {lastDayMinutes} {t.minutesShort} {recency}</>}
         </span>
       </span>
       <ActivityHistogram studySecondsByDate={lesson.studySecondsByDate ?? {}} today={today} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
@@ -1477,7 +1477,7 @@ export default function VocabPage() {
                 <span>{t.complexLesson}</span>
                 <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
                   {t.size} {allHomeWords.length} ({complexWordCount}) · {t.total} {complexTotalMinutes} {t.minutesShort}
-                  {complexRecency && <> · {complexRecency} {complexLastDayMinutes} {t.minutesShort}</>}
+                  {complexRecency && <> · {complexLastDayMinutes} {t.minutesShort} {complexRecency}</>}
                 </span>
               </span>
               <ActivityHistogram studySecondsByDate={complexStudySecondsByDate} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
