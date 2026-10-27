@@ -610,6 +610,7 @@ export default function VocabPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceRevealed, setSourceRevealed] = useState(false);
   const shufflePositionsRef = useRef<Map<string, number> | null>(null);
+  const lastAutoRevealedKeyRef = useRef<string | null>(null);
   const [copyLesson, setCopyLesson] = useState(false);
   const [newLessonName, setNewLessonName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -709,6 +710,7 @@ export default function VocabPage() {
         setIsComplexLesson(false);
         setShowHome(true);
       }
+      lastAutoRevealedKeyRef.current = null;
       setSettingsOpen(false);
       setSourceRevealed(false);
       setRevealed(new Set());
@@ -821,6 +823,7 @@ export default function VocabPage() {
   };
 
   const handleRandomize = (val: boolean) => {
+    lastAutoRevealedKeyRef.current = null;
     captureShufflePositions();
     if (val) setShuffledWords(shuffleGroupsAndWords(words));
     if (isComplexLesson) setSettings(s => ({ ...s, complexRandomize: val }));
@@ -836,6 +839,7 @@ export default function VocabPage() {
   }, [randomize, shuffledWords, words]);
 
   useEffect(() => {
+    lastAutoRevealedKeyRef.current = null;
     if (randomize) setShuffledWords(shuffleGroupsAndWords(words));
   }, [wordOrderSignature, randomize, randomOrderContext]);
 
@@ -882,15 +886,27 @@ export default function VocabPage() {
     });
   }, [displayWords]);
 
-  const nextHiddenWord = displayWords.find(word => !revealed.has(wordIdentity(word)));
+  let nextHiddenWord: Word | undefined;
+  if (displayWords.length > 0) {
+    const cursorIndex = displayWords.findIndex(word => wordIdentity(word) === lastAutoRevealedKeyRef.current);
+    for (let step = 1; step <= displayWords.length; step++) {
+      const candidate = displayWords[(cursorIndex + step) % displayWords.length];
+      if (!revealed.has(wordIdentity(candidate))) {
+        nextHiddenWord = candidate;
+        break;
+      }
+    }
+  }
   const revealNext = useCallback(() => {
     if (!nextHiddenWord) return false;
-    setRevealed(previous => new Set(previous).add(wordIdentity(nextHiddenWord)));
-    if (!displayWords.some(word => wordIdentity(word) !== wordIdentity(nextHiddenWord) && !revealed.has(wordIdentity(word)))) setAllRevealed(true);
+    const revealedKey = wordIdentity(nextHiddenWord);
+    lastAutoRevealedKeyRef.current = revealedKey;
+    setRevealed(previous => new Set(previous).add(revealedKey));
+    if (!displayWords.some(word => wordIdentity(word) !== revealedKey && !revealed.has(wordIdentity(word)))) setAllRevealed(true);
     return true;
   }, [displayWords, nextHiddenWord, revealed]);
 
-  const animateScrollTo = (targetY: number, durationMs = 2000) => {
+  const animateScrollTo = (targetY: number, durationMs = 2000, onComplete?: () => void) => {
     if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
     const startY = window.scrollY;
     revealScrollTargetRef.current = targetY;
@@ -898,6 +914,7 @@ export default function VocabPage() {
       window.scrollTo(0, targetY);
       revealScrollFrameRef.current = null;
       revealScrollTargetRef.current = null;
+      if (onComplete) requestAnimationFrame(onComplete);
       return;
     }
     const startTime = performance.now();
@@ -910,6 +927,7 @@ export default function VocabPage() {
       else {
         revealScrollFrameRef.current = null;
         revealScrollTargetRef.current = null;
+        onComplete?.();
       }
     };
     revealScrollFrameRef.current = requestAnimationFrame(animate);
@@ -924,26 +942,44 @@ export default function VocabPage() {
     if (!nextHiddenWord) return;
     const row = document.querySelector<HTMLElement>(`[data-testid="row-word-${nextHiddenWord.id}"]`);
     const answer = row?.querySelector<HTMLElement>(".answer-reveal");
-    if (!revealNext() || !settings.autoScroll || !row || !answer) return;
+    const revealSelectedWord = (scrollForwardAfterReveal: boolean) => {
+      if (!revealNext() || !scrollForwardAfterReveal || !settings.autoScroll || !row || !answer) return;
 
-    let finished = false;
-    let fallbackTimer = 0;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      window.clearTimeout(fallbackTimer);
-      answer.removeEventListener("transitionend", onTransitionEnd);
-      requestAnimationFrame(() => {
-        const rowHeight = row.getBoundingClientRect().height;
-        if (settingsRef.current.autoScroll && rowHeight > 0) scrollByRevealHeight(rowHeight);
-      });
+      let finished = false;
+      let fallbackTimer = 0;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(fallbackTimer);
+        answer.removeEventListener("transitionend", onTransitionEnd);
+        requestAnimationFrame(() => {
+          if (settingsRef.current.autoScroll && row.getBoundingClientRect().height > 0) {
+            scrollByRevealHeight(row.getBoundingClientRect().height);
+          }
+        });
+      };
+      const onTransitionEnd = (event: TransitionEvent) => {
+        if (event.target === answer && event.propertyName === "grid-template-rows") finish();
+      };
+      answer.addEventListener("transitionend", onTransitionEnd);
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) requestAnimationFrame(finish);
+      else fallbackTimer = window.setTimeout(finish, REVEAL_TRANSITION_MS + 50);
     };
-    const onTransitionEnd = (event: TransitionEvent) => {
-      if (event.target === answer && event.propertyName === "grid-template-rows") finish();
-    };
-    answer.addEventListener("transitionend", onTransitionEnd);
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) requestAnimationFrame(finish);
-    else fallbackTimer = window.setTimeout(finish, REVEAL_TRANSITION_MS + 50);
+
+    if (!settings.autoScroll || !row) {
+      revealSelectedWord(false);
+      return;
+    }
+    const rowRect = row.getBoundingClientRect();
+    const viewportTop = 56;
+    if (rowRect.top < viewportTop || rowRect.bottom > window.innerHeight) {
+      const delta = rowRect.top < viewportTop
+        ? rowRect.top - viewportTop
+        : rowRect.bottom - window.innerHeight + 16;
+      animateScrollTo(window.scrollY + delta, 2000, () => revealSelectedWord(false));
+    } else {
+      revealSelectedWord(true);
+    }
   };
 
   const hasHiddenWords = nextHiddenWord !== undefined;
@@ -957,6 +993,7 @@ export default function VocabPage() {
         captureShufflePositions();
         setShuffledWords(shuffleGroupsAndWords(words));
       }
+      lastAutoRevealedKeyRef.current = null;
       setRevealed(new Set());
       setAllRevealed(false);
     }
@@ -1039,6 +1076,7 @@ export default function VocabPage() {
   }, [createLessonOpen, lessonDetailsOpen]);
 
   const openLesson = (lessonId: string, replace = false) => {
+    lastAutoRevealedKeyRef.current = null;
     setSettingsOpen(false);
     setSourceRevealed(false);
     if (replace) window.history.replaceState(null, "", lessonPath(lessonId));
@@ -1052,6 +1090,7 @@ export default function VocabPage() {
   };
 
   const openHome = () => {
+    lastAutoRevealedKeyRef.current = null;
     setSettingsOpen(false);
     setSourceRevealed(false);
     window.history.pushState(null, "", homePath());
@@ -1111,6 +1150,7 @@ export default function VocabPage() {
 
   const deleteCurrentLesson = () => {
     if (lessonState.lessons.length <= 1 || !window.confirm(t.deleteConfirm.replace("{name}", activeLesson.name))) return;
+    lastAutoRevealedKeyRef.current = null;
     const index = lessonState.lessons.findIndex(lesson => lesson.id === activeLesson.id);
     const remaining = lessonState.lessons.filter(lesson => lesson.id !== activeLesson.id);
     setLessonState({ lessons: remaining, activeId: remaining[Math.max(0, index - 1)].id });
@@ -1125,8 +1165,10 @@ export default function VocabPage() {
   }, []);
 
   const toggleAll = () => {
-    if (allRevealed) { setRevealed(new Set()); }
-    else { setRevealed(new Set(displayWords.map(wordIdentity))); }
+    if (allRevealed) {
+      lastAutoRevealedKeyRef.current = null;
+      setRevealed(new Set());
+    } else { setRevealed(new Set(displayWords.map(wordIdentity))); }
     setAllRevealed(a => !a);
   };
 
@@ -1229,6 +1271,7 @@ export default function VocabPage() {
       setLessonState({ lessons, activeId });
       setComplexStudySecondsByDate(normalizeStudySeconds(backup.complexStudySecondsByDate));
       setSettings(normalizeSettings(backup.settings));
+      lastAutoRevealedKeyRef.current = null;
       setRevealed(new Set());
       setAllRevealed(false);
       setFilterLevel(0);
@@ -1531,6 +1574,7 @@ export default function VocabPage() {
               <input type="checkbox" checked={isInverted(wordsText)}
                 onChange={event => {
                   updateActiveLesson(lesson => ({ ...lesson, wordsText: setInverted(lesson.wordsText, event.target.checked) }), false);
+                  lastAutoRevealedKeyRef.current = null;
                   setRevealed(new Set());
                   setAllRevealed(false);
                 }} />
