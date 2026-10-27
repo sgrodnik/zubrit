@@ -1439,7 +1439,7 @@ export default function VocabPage() {
             <strong>{t.lessonDetails}</strong>
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ color: p.fgMuted }}>{t.lessonName}</span>
-              <input autoFocus value={newLessonName} onChange={event => setNewLessonName(event.target.value)} required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
+              <input value={newLessonName} onChange={event => setNewLessonName(event.target.value)} required style={{ padding: 8, color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }} />
             </label>
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 12px", fontSize: 13 }}>
               <span style={{ color: p.fgMuted }}>{t.created}:</span><span>{formatDateTime(activeLesson.createdAt, getLang() === "ru" ? "ru-RU" : "en-US")}</span>
