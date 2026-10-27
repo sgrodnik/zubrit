@@ -485,11 +485,12 @@ function NumberedTextarea({ value, onChange, onBlur, onReveal, sourceRevealed, p
   };
   return (
     <div style={{ display: "flex", border: `1px solid ${p.fgVeryMuted}`, fontFamily: "monospace", fontSize: 12, lineHeight: "1.5", background: p.bg, maxHeight: maxHeight ?? undefined, overflow: "hidden" }}>
-      <div ref={numRef} style={{ padding: "4px 6px", color: p.fgVeryMuted, textAlign: "right", userSelect: "none", overflow: "hidden", minWidth: 28, background: p.divider, borderRight: `1px solid ${p.divider}`, whiteSpace: "pre", filter: sourceRevealed ? undefined : "blur(5px)" }}>
+      <div ref={numRef} className="source-blur-transition" style={{ padding: "4px 6px", color: p.fgVeryMuted, textAlign: "right", userSelect: "none", overflow: "hidden", minWidth: 28, background: p.divider, borderRight: `1px solid ${p.divider}`, whiteSpace: "pre", filter: sourceRevealed ? undefined : "blur(5px)" }}>
         {Array.from({ length: lines }, (_, i) => i + 1).join("\n")}
       </div>
       <textarea
         ref={taRef}
+        className="source-blur-transition"
         data-testid="input-words"
         value={value}
         onChange={e => onChange(e.target.value)}
@@ -1447,8 +1448,11 @@ export default function VocabPage() {
           transition: height 240ms ease, opacity 180ms ease, content-visibility 240ms allow-discrete;
         }
         details.zs[open]::details-content { height: auto; opacity: 1; }
-        @media (prefers-reduced-motion: reduce) { details.zs::details-content { transition: none; } }
+        .vocab-settings-panel { display: grid; overflow: hidden; transition: grid-template-rows 240ms ease, opacity 180ms ease, margin-bottom 240ms ease; }
+        .vocab-settings-panel__content { min-height: 0; overflow: hidden; }
+        @media (prefers-reduced-motion: reduce) { details.zs::details-content, .vocab-settings-panel, .source-blur-transition { transition: none; } }
         .zw { display: flex; }
+        .source-blur-transition { transition: filter 160ms ease; }
         .answer-reveal { position: relative; display: grid; grid-template-rows: 0fr; min-height: 0.6em; transition: grid-template-rows ${REVEAL_TRANSITION_MS}ms ease; }
         .answer-reveal.is-open { grid-template-rows: 1fr; }
         .answer-reveal__content { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-2px); transition: opacity 150ms ease, transform ${REVEAL_TRANSITION_MS}ms ease; }
@@ -1530,7 +1534,10 @@ export default function VocabPage() {
 
         {/* Sticky settings / progress header */}
         <div style={{ position: "sticky", top: 0, zIndex: 20, display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 12, padding: "8px 0", marginBottom: settingsOpen ? "0.5rem" : "1.25rem", background: p.bg, borderBottom: `1px solid ${p.divider}` }}>
-          <button type="button" aria-expanded={settingsOpen} aria-controls="vocab-settings-panel" onClick={() => setSettingsOpen(open => !open)}
+          <button type="button" aria-expanded={settingsOpen} aria-controls="vocab-settings-panel" onClick={() => {
+            if (!settingsOpen && window.scrollY > 1) animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
+            setSettingsOpen(open => !open);
+          }}
             style={{ background: "none", border: "none", padding: 0, justifySelf: "start", cursor: "pointer", color: p.fgMuted, fontSize: 13, textAlign: "left" }}>{t.settings}</button>
           <div role="status" aria-live="polite" aria-label={`${revealedCount}/${totalCount} · ${pct}%`}
             style={{ display: "flex", gap: 16, justifyContent: "center", color: p.fg, fontSize: 13 }}>
@@ -1543,8 +1550,9 @@ export default function VocabPage() {
           </button>
         </div>
 
-        <div id="vocab-settings-panel" hidden={!settingsOpen} style={{ marginBottom: "1.25rem" }}>
-          <div style={{ paddingTop: "0.4rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
+        <div id="vocab-settings-panel" className="vocab-settings-panel" aria-hidden={!settingsOpen} inert={!settingsOpen}
+          style={{ gridTemplateRows: settingsOpen ? "1fr" : "0fr", opacity: settingsOpen ? 1 : 0, marginBottom: settingsOpen ? "1.25rem" : 0, pointerEvents: settingsOpen ? "auto" : "none" }}>
+          <div className="vocab-settings-panel__content" style={{ paddingTop: "0.4rem", display: "flex", flexDirection: "column", gap: "0.7rem", fontSize: 13 }}>
             {/* Frequently used controls */}
             <label style={lbl}>
               <span style={{ width: 120 }}>{t.randomOrder}</span>
