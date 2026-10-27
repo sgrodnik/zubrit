@@ -45,6 +45,7 @@ export function loadLessonState(): LessonState {
           randomize: lesson.randomize === true,
           createdAt: lesson.createdAt ?? Date.now(),
           updatedAt: lesson.updatedAt ?? Date.now(),
+          lastStudiedAt: Number.isFinite(lesson.lastStudiedAt) ? lesson.lastStudiedAt : undefined,
           studySecondsByDate: normalizeStudySeconds(lesson.studySecondsByDate),
         };
       });

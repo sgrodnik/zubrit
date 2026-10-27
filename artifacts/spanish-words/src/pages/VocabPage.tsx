@@ -12,6 +12,7 @@ const CHANGELOG_ENTRIES = changelogMarkdown.split("\n").flatMap(line => {
 const SETTINGS_KEY = "spanish-vocab-settings-v2";
 const COMPLEX_LESSON_ID = "__complex-words__";
 const COMPLEX_STUDY_KEY = "spanish-vocab-complex-study-v1";
+const COMPLEX_LAST_STUDIED_KEY = "spanish-vocab-complex-last-studied-v1";
 const REVEAL_BUTTON_POSITION_KEY = "spanish-vocab-reveal-button-position-v1";
 const DEFAULT_REVEAL_BUTTON_SIZE = 104;
 const MIN_REVEAL_BUTTON_SIZE = 48;
@@ -20,6 +21,7 @@ const SCROLL_TO_TOP_DURATION_MS = 700;
 const BACKUP_FORMAT = "spanish-words-backup";
 const BACKUP_VERSION = 1;
 const IDLE_TIMEOUT_MS = 10_000;
+const MIN_STUDY_SESSION_MS = 10_000;
 const MIN_VISIBLE_STUDY_SECONDS = 30;
 const REVEAL_TRANSITION_MS = 180;
 
@@ -46,6 +48,13 @@ function splitStudyInterval(start: number, end: number): Array<{ date: string; m
 function loadComplexStudySeconds(): Record<string, number> {
   try { return normalizeStudySeconds(JSON.parse(localStorage.getItem(COMPLEX_STUDY_KEY) ?? "{}")); }
   catch { return {}; }
+}
+
+function loadComplexLastStudiedAt(): number | undefined {
+  try {
+    const timestamp = JSON.parse(localStorage.getItem(COMPLEX_LAST_STUDIED_KEY) ?? "null");
+    return Number.isFinite(timestamp) ? timestamp : undefined;
+  } catch { return undefined; }
 }
 
 function wordIdentity(word: Word): string {
@@ -76,14 +85,26 @@ function daysBetweenDateKeys(earlier: string, later: string): number {
   return Math.max(0, Math.round((Date.UTC(ly, lm - 1, ld) - Date.UTC(ey, em - 1, ed)) / 86_400_000));
 }
 
-function lessonStudySummary(lesson: Lesson, today: string, t: { minutesShort: string; today: string; yesterday: string; daysAgo: string }): string {
+function formatRelativeStudyTime(timestamp: number, now: number, t: { justNow: string; minutesAgo: string; hoursAgo: string; yesterday: string; daysAgo: string }): string {
+  const elapsedMinutes = Math.floor(Math.max(0, now - timestamp) / 60_000);
+  if (elapsedMinutes < 1) return t.justNow;
+  if (elapsedMinutes < 60) return `${elapsedMinutes} ${t.minutesAgo}`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} ${t.hoursAgo}`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return elapsedDays === 1 ? t.yesterday : `${elapsedDays} ${t.daysAgo}`;
+}
+
+function lessonStudySummary(lesson: Lesson, today: string, now: number, t: { minutesShort: string; today: string; yesterday: string; daysAgo: string; justNow: string; minutesAgo: string; hoursAgo: string }): string {
   const entries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
   const totalSeconds = entries.reduce((total, [, seconds]) => total + seconds, 0);
-  if (entries.length === 0) return `0 ${t.minutesShort}`;
+  if (entries.length === 0 && lesson.lastStudiedAt === undefined) return `0 ${t.minutesShort}`;
   const dates = entries.map(([date]) => date).sort();
   const lastDate = dates[dates.length - 1];
-  const days = daysBetweenDateKeys(lastDate, today);
-  const recency = days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`;
+  const days = lastDate ? daysBetweenDateKeys(lastDate, today) : 0;
+  const recency = lesson.lastStudiedAt !== undefined
+    ? formatRelativeStudyTime(lesson.lastStudiedAt, now, t)
+    : days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`;
   return `${Math.round(totalSeconds / 60)} ${t.minutesShort} · ${recency}`;
 }
 
@@ -271,6 +292,9 @@ const LANGUAGES = {
     yesterday: "вчера",
     daysAgo: "дн. назад",
     noActivity: "нет активности",
+    justNow: "только что",
+    minutesAgo: "мин. назад",
+    hoursAgo: "ч назад",
     revealNextHint: "Пробел: открыть следующую строку",
     revealNext: "Открыть следующую строку",
     autoScroll: "Автоматическая прокрутка",
@@ -352,6 +376,9 @@ const LANGUAGES = {
     yesterday: "yesterday",
     daysAgo: "d ago",
     noActivity: "no activity",
+    justNow: "just now",
+    minutesAgo: "min ago",
+    hoursAgo: "h ago",
     revealNextHint: "Space: reveal the next row",
     revealNext: "Reveal the next row",
     autoScroll: "Automatic scrolling",
@@ -507,8 +534,8 @@ function NumberedTextarea({ value, onChange, onBlur, onReveal, sourceRevealed, p
   );
 }
 
-function LessonCard({ lesson, rank, today, t, p, onClick, padding = "10px 0" }: {
-  lesson: Lesson; rank: number; today: string; t: typeof LANGUAGES.ru; p: Palette; onClick: () => void; padding?: string;
+function LessonCard({ lesson, rank, today, now, t, p, onClick, padding = "10px 0" }: {
+  lesson: Lesson; rank: number; today: string; now: number; t: typeof LANGUAGES.ru; p: Palette; onClick: () => void; padding?: string;
 }) {
   const lessonWords = parseWords(lesson.wordsText);
   const complexCount = lessonWords.filter(word => word.complexity > 0).length;
@@ -516,9 +543,11 @@ function LessonCard({ lesson, rank, today, t, p, onClick, padding = "10px 0" }: 
   const totalMinutes = Math.round(studyEntries.reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
   const lastDate = studyEntries.map(([date]) => date).sort().at(-1);
   const lastDayMinutes = lastDate ? Math.round((lesson.studySecondsByDate?.[lastDate] ?? 0) / 60) : 0;
-  const recency = lastDate
-    ? (() => { const days = daysBetweenDateKeys(lastDate, today); return days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`; })()
-    : "";
+  const recency = lesson.lastStudiedAt !== undefined
+    ? formatRelativeStudyTime(lesson.lastStudiedAt, now, t)
+    : lastDate
+      ? (() => { const days = daysBetweenDateKeys(lastDate, today); return days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`; })()
+      : "";
 
   return (
     <button type="button" onClick={onClick} aria-label={`${lesson.name}. ${t.size} ${lessonWords.length} (${complexCount})`}
@@ -607,6 +636,7 @@ export default function VocabPage() {
   showHomeRef.current = showHome;
   const activeLesson = lessonState.lessons.find(lesson => lesson.id === lessonState.activeId) ?? lessonState.lessons[0];
   const [complexStudySecondsByDate, setComplexStudySecondsByDate] = useState<Record<string, number>>(loadComplexStudySeconds);
+  const [complexLastStudiedAt, setComplexLastStudiedAt] = useState<number | undefined>(loadComplexLastStudiedAt);
   const t = LANGUAGES[getLang()];
   const wordsText = activeLesson.wordsText;
   const inverted = isInverted(wordsText);
@@ -642,12 +672,14 @@ export default function VocabPage() {
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceRevealed, setSourceRevealed] = useState(false);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const shufflePositionsRef = useRef<Map<string, number> | null>(null);
   const lastAutoRevealedKeyRef = useRef<string | null>(null);
   const [copyLesson, setCopyLesson] = useState(false);
   const [newLessonName, setNewLessonName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
   const studyRemaindersRef = useRef<Record<string, number>>({});
+  const studySessionRef = useRef<{ lessonId: string; activeMilliseconds: number } | null>(null);
   const activityRef = useRef({
     lessonId: lessonState.activeId,
     lastActivityAt: 0,
@@ -679,10 +711,14 @@ export default function VocabPage() {
     const tracker = activityRef.current;
     const lessonId = tracker.lessonId;
     const additions: Record<string, number> = {};
+    let activeMilliseconds = 0;
+    let lastActiveUntil = 0;
     if (tracker.visible && tracker.lastActivityAt > 0) {
       const from = Math.max(tracker.accountedUntil, tracker.lastActivityAt);
       const until = Math.min(now, tracker.lastActivityAt + IDLE_TIMEOUT_MS);
       if (until > from) {
+        activeMilliseconds = until - from;
+        lastActiveUntil = until;
         for (const segment of splitStudyInterval(from, until)) {
           const remainderKey = `${lessonId}|${segment.date}`;
           const totalMs = (studyRemaindersRef.current[remainderKey] ?? 0) + segment.milliseconds;
@@ -693,17 +729,30 @@ export default function VocabPage() {
       }
     }
     tracker.accountedUntil = Math.max(tracker.accountedUntil, now);
-    if (Object.keys(additions).length > 0) {
+    const session = studySessionRef.current;
+    let updateLastStudiedAt = false;
+    if (activeMilliseconds > 0 && session?.lessonId === lessonId) {
+      session.activeMilliseconds += activeMilliseconds;
+      updateLastStudiedAt = session.activeMilliseconds >= MIN_STUDY_SESSION_MS;
+    }
+    if (Object.keys(additions).length > 0 || updateLastStudiedAt) {
       if (lessonId === COMPLEX_LESSON_ID) {
-        setComplexStudySecondsByDate(current => ({
-          ...current,
-          ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (current[date] ?? 0) + seconds])),
-        }));
+        if (Object.keys(additions).length > 0) {
+          setComplexStudySecondsByDate(current => ({
+            ...current,
+            ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (current[date] ?? 0) + seconds])),
+          }));
+        }
+        if (updateLastStudiedAt) setComplexLastStudiedAt(lastActiveUntil);
       } else {
         setLessonState(state => ({
           ...state,
           lessons: state.lessons.map(lesson => lesson.id === lessonId
-            ? { ...lesson, studySecondsByDate: { ...(lesson.studySecondsByDate ?? {}), ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (lesson.studySecondsByDate?.[date] ?? 0) + seconds])) } }
+            ? {
+              ...lesson,
+              ...(updateLastStudiedAt ? { lastStudiedAt: lastActiveUntil } : {}),
+              ...(Object.keys(additions).length > 0 ? { studySecondsByDate: { ...(lesson.studySecondsByDate ?? {}), ...Object.fromEntries(Object.entries(additions).map(([date, seconds]) => [date, (lesson.studySecondsByDate?.[date] ?? 0) + seconds])) } } : {}),
+            }
             : lesson),
         }));
       }
@@ -714,16 +763,28 @@ export default function VocabPage() {
     const tracker = activityRef.current;
     if (showHomeRef.current || !tracker.visible || document.visibilityState !== "visible") return;
     const now = Date.now();
+    const sameStudySession = tracker.lastActivityAt > 0
+      && now - tracker.lastActivityAt <= IDLE_TIMEOUT_MS
+      && studySessionRef.current?.lessonId === tracker.lessonId;
     accrueStudyTime(now);
+    if (!sameStudySession) studySessionRef.current = { lessonId: tracker.lessonId, activeMilliseconds: 0 };
     tracker.lastActivityAt = now;
     tracker.accountedUntil = now;
   }, [accrueStudyTime]);
 
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   useEffect(() => { setRevealButtonSizeDraft(String(settings.revealButtonSize)); }, [settings.revealButtonSize]);
   useEffect(() => { saveLessonState({ ...lessonState, activeId: activeLesson.id }); }, [lessonState, activeLesson.id]);
   useEffect(() => {
     localStorage.setItem(COMPLEX_STUDY_KEY, JSON.stringify(complexStudySecondsByDate));
   }, [complexStudySecondsByDate]);
+  useEffect(() => {
+    if (complexLastStudiedAt === undefined) localStorage.removeItem(COMPLEX_LAST_STUDIED_KEY);
+    else localStorage.setItem(COMPLEX_LAST_STUDIED_KEY, JSON.stringify(complexLastStudiedAt));
+  }, [complexLastStudiedAt]);
 
   useEffect(() => {
     const syncRoute = () => {
@@ -765,10 +826,12 @@ export default function VocabPage() {
         tracker.visible = false;
         tracker.lastActivityAt = 0;
         tracker.accountedUntil = now;
+        studySessionRef.current = null;
       } else {
         tracker.visible = true;
         tracker.lastActivityAt = 0;
         tracker.accountedUntil = now;
+        studySessionRef.current = null;
       }
     };
     const onPageHide = () => {
@@ -776,12 +839,14 @@ export default function VocabPage() {
       accrueStudyTime(Date.now());
       tracker.visible = false;
       tracker.lastActivityAt = 0;
+      studySessionRef.current = null;
     };
     const onPageShow = () => {
       const tracker = activityRef.current;
       tracker.visible = document.visibilityState === "visible";
       tracker.lastActivityAt = 0;
       tracker.accountedUntil = Date.now();
+      studySessionRef.current = null;
     };
     document.addEventListener("pointermove", recordActivity, { passive: true });
     document.addEventListener("pointerdown", recordActivity, { passive: true });
@@ -793,6 +858,7 @@ export default function VocabPage() {
     const interval = window.setInterval(tick, 1000);
     return () => {
       accrueStudyTime(Date.now());
+      studySessionRef.current = null;
       window.clearInterval(interval);
       document.removeEventListener("pointermove", recordActivity);
       document.removeEventListener("pointerdown", recordActivity);
@@ -811,6 +877,7 @@ export default function VocabPage() {
     accrueStudyTime(now);
     tracker.lastActivityAt = 0;
     tracker.accountedUntil = now;
+    studySessionRef.current = null;
   }, [showHome, accrueStudyTime]);
 
   const activeStudyId = isComplexLesson ? COMPLEX_LESSON_ID : activeLesson.id;
@@ -823,6 +890,9 @@ export default function VocabPage() {
     tracker.lessonId = activeStudyId;
     tracker.accountedUntil = now;
     tracker.lastActivityAt = wasActive ? now : 0;
+    studySessionRef.current = wasActive
+      ? { lessonId: activeStudyId, activeMilliseconds: 0 }
+      : null;
   }, [activeStudyId, accrueStudyTime]);
 
   // Resolve active theme
@@ -1122,6 +1192,17 @@ export default function VocabPage() {
     setShowHome(false);
   };
 
+  const openLessonFromHome = (lessonId: string) => {
+    openLesson(lessonId);
+    const now = Date.now();
+    const tracker = activityRef.current;
+    tracker.lessonId = lessonId;
+    tracker.lastActivityAt = now;
+    tracker.accountedUntil = now;
+    tracker.visible = document.visibilityState === "visible";
+    studySessionRef.current = tracker.visible ? { lessonId, activeMilliseconds: 0 } : null;
+  };
+
   const openHome = () => {
     lastAutoRevealedKeyRef.current = null;
     setSettingsOpen(false);
@@ -1261,6 +1342,7 @@ export default function VocabPage() {
       lessons: lessonState.lessons,
       activeLessonId: activeLesson.id,
       complexStudySecondsByDate,
+      complexLastStudiedAt,
       settings,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
@@ -1296,6 +1378,7 @@ export default function VocabPage() {
           randomize: item.randomize === true,
           createdAt: Number.isFinite(item.createdAt) ? item.createdAt : now,
           updatedAt: Number.isFinite(item.updatedAt) ? item.updatedAt : now,
+          lastStudiedAt: Number.isFinite(item.lastStudiedAt) ? item.lastStudiedAt : undefined,
           studySecondsByDate: normalizeStudySeconds(item.studySecondsByDate),
         };
       });
@@ -1303,6 +1386,7 @@ export default function VocabPage() {
       const activeId = lessons.some(lesson => lesson.id === backup.activeLessonId) ? backup.activeLessonId : lessons[0].id;
       setLessonState({ lessons, activeId });
       setComplexStudySecondsByDate(normalizeStudySeconds(backup.complexStudySecondsByDate));
+      setComplexLastStudiedAt(Number.isFinite(backup.complexLastStudiedAt) ? backup.complexLastStudiedAt : undefined);
       setSettings(normalizeSettings(backup.settings));
       lastAutoRevealedKeyRef.current = null;
       setRevealed(new Set());
@@ -1333,7 +1417,7 @@ export default function VocabPage() {
   const languagePair = wordsText.match(/^\s*#lang\s+(\S+)\s+(.+?)\s*$/m);
   const firstLanguage = languagePair?.[1] ?? t.russian;
   const secondLanguage = languagePair?.[2] ?? t.spanish;
-  const todayStudyDate = studyDateKey(Date.now());
+  const todayStudyDate = studyDateKey(clockNow);
   const allStudySecondsByDate = useMemo(() => {
     const totals = { ...complexStudySecondsByDate };
     for (const lesson of lessonState.lessons) {
@@ -1357,9 +1441,12 @@ export default function VocabPage() {
     const complexStudyEntries = Object.entries(complexStudySecondsByDate).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
     const complexTotalMinutes = Math.round(complexStudyEntries.reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
     const complexLastDate = complexStudyEntries.map(([date]) => date).sort().at(-1);
-    const complexRecency = complexLastDate
-      ? (() => { const days = daysBetweenDateKeys(complexLastDate, todayStudyDate); return days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`; })()
-      : "";
+    const complexLastDayMinutes = complexLastDate ? Math.round((complexStudySecondsByDate[complexLastDate] ?? 0) / 60) : 0;
+    const complexRecency = complexLastStudiedAt !== undefined
+      ? formatRelativeStudyTime(complexLastStudiedAt, clockNow, t)
+      : complexLastDate
+        ? (() => { const days = daysBetweenDateKeys(complexLastDate, todayStudyDate); return days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`; })()
+        : "";
     return (
       <>
         <style>{`body { background: ${p.bg}; color: ${p.fg}; } .zc { padding: 1.5rem; padding-bottom: calc(56px + env(safe-area-inset-bottom)); max-width: ${settings.maxWidth}px; margin: 0 auto; } @media (max-width: 600px) { .zc { padding: 1.5rem 0.75rem; padding-bottom: calc(56px + env(safe-area-inset-bottom)); } } .changelog-bar { transition: opacity 180ms ease, transform 180ms ease; } @media (prefers-reduced-motion: reduce) { .changelog-bar { transition: none; } }`}</style>
@@ -1383,19 +1470,19 @@ export default function VocabPage() {
             <DailyTotalsHistogram studySecondsByDate={allStudySecondsByDate} lessonCreatedOnDates={lessonCreatedOnDates} today={todayStudyDate} label={`${t.activity} · ${t.last30Days}`} minutesShort={t.minutesShort} lessonCreatedLabel={t.lessonCreated} locale={getLang() === "ru" ? "ru-RU" : "en-US"} color={p.fgMuted} mutedColor={p.fgVeryMuted} dotColor={p.fg} backgroundColor={p.bg} />
           </section>
           <div>
-            {allHomeWords.length > 0 && <button type="button" onClick={() => openLesson(COMPLEX_LESSON_ID)}
+            {allHomeWords.length > 0 && <button type="button" onClick={() => openLessonFromHome(COMPLEX_LESSON_ID)}
               aria-label={`${t.complexLesson}. ${t.size} ${allHomeWords.length} (${complexWordCount})`}
               style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 0", color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
               <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
                 <span>{t.complexLesson}</span>
                 <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
                   {t.size} {allHomeWords.length} ({complexWordCount}) · {t.total} {complexTotalMinutes} {t.minutesShort}
-                  {complexRecency && <> · {complexRecency} {Math.round((complexStudySecondsByDate[complexLastDate!] ?? 0) / 60)} {t.minutesShort}</>}
+                  {complexRecency && <> · {complexRecency} {complexLastDayMinutes} {t.minutesShort}</>}
                 </span>
               </span>
               <ActivityHistogram studySecondsByDate={complexStudySecondsByDate} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
             </button>}
-            {sortedLessons.map((lesson, index) => <LessonCard key={lesson.id} lesson={lesson} rank={sortedLessons.length - index} today={todayStudyDate} t={t} p={p} onClick={() => openLesson(lesson.id)} />)}
+            {sortedLessons.map((lesson, index) => <LessonCard key={lesson.id} lesson={lesson} rank={sortedLessons.length - index} today={todayStudyDate} now={clockNow} t={t} p={p} onClick={() => openLessonFromHome(lesson.id)} />)}
           </div>
         </main>
         {CHANGELOG_ENTRIES.length > 0 && <div className="changelog-bar" aria-hidden={!isAtTop} style={{ position: "fixed", zIndex: 50, right: 0, bottom: 0, left: 0, paddingBottom: "env(safe-area-inset-bottom)", background: p.bg, borderTop: `1px solid ${p.fgVeryMuted}`, opacity: isAtTop ? 1 : 0, transform: isAtTop ? "translateY(0)" : "translateY(100%)", pointerEvents: isAtTop ? "auto" : "none" }}>
@@ -1480,7 +1567,7 @@ export default function VocabPage() {
           }} style={{ maxWidth: "70%", padding: "6px 8px", color: p.fg, background: p.bg, border: `1px solid ${p.fgVeryMuted}` }}>
             <option value="__home__">{t.lesson}</option>
             <option value={COMPLEX_LESSON_ID}>{t.complexLesson}</option>
-            {sortedLessons.map((lesson, index) => <option key={lesson.id} value={lesson.id}>{sortedLessons.length - index}. {lesson.name} — {lessonStudySummary(lesson, todayStudyDate, t)}</option>)}
+            {sortedLessons.map((lesson, index) => <option key={lesson.id} value={lesson.id}>{sortedLessons.length - index}. {lesson.name} — {lessonStudySummary(lesson, todayStudyDate, clockNow, t)}</option>)}
           </select>
           {!isComplexLesson && <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button type="button" onClick={() => { setNewLessonName(activeLesson.name); setLessonDetailsOpen(true); }} style={lnk}>{t.details}</button>
@@ -1733,14 +1820,14 @@ export default function VocabPage() {
         {!isComplexLesson && currentLessonIndex >= 0 && sortedLessons.length > 1 && <nav aria-label={`${t.previousLesson} / ${t.nextLesson}`} style={{ display: "flex", flexDirection: "column", gap: 32, marginTop: 40 }}>
           {currentLessonIndex > 0 && <section>
             <div style={{ color: p.fgMuted, fontSize: 12 }}>{t.previousLesson}</div>
-            <LessonCard key={sortedLessons[currentLessonIndex - 1].id} lesson={sortedLessons[currentLessonIndex - 1]} rank={sortedLessons.length - currentLessonIndex + 1} today={todayStudyDate} t={t} p={p} padding="0 0 16px" onClick={() => {
+            <LessonCard key={sortedLessons[currentLessonIndex - 1].id} lesson={sortedLessons[currentLessonIndex - 1]} rank={sortedLessons.length - currentLessonIndex + 1} today={todayStudyDate} now={clockNow} t={t} p={p} padding="0 0 16px" onClick={() => {
               openLesson(sortedLessons[currentLessonIndex - 1].id);
               animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
             }} />
           </section>}
           {currentLessonIndex < sortedLessons.length - 1 && <section>
             <div style={{ color: p.fgMuted, fontSize: 12 }}>{t.nextLesson}</div>
-            <LessonCard key={sortedLessons[currentLessonIndex + 1].id} lesson={sortedLessons[currentLessonIndex + 1]} rank={sortedLessons.length - currentLessonIndex - 1} today={todayStudyDate} t={t} p={p} padding="0 0 16px" onClick={() => {
+            <LessonCard key={sortedLessons[currentLessonIndex + 1].id} lesson={sortedLessons[currentLessonIndex + 1]} rank={sortedLessons.length - currentLessonIndex - 1} today={todayStudyDate} now={clockNow} t={t} p={p} padding="0 0 16px" onClick={() => {
               openLesson(sortedLessons[currentLessonIndex + 1].id);
               animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
             }} />

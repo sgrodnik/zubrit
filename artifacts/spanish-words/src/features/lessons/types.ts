@@ -5,6 +5,7 @@ export type Lesson = {
   randomize: boolean;
   createdAt: number;
   updatedAt: number;
+  lastStudiedAt?: number;
   studySecondsByDate: Record<string, number>;
 };
 
