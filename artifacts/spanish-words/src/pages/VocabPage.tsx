@@ -61,6 +61,14 @@ function wordIdentity(word: Word): string {
   return word.key ?? word.russian;
 }
 
+function answerLines(value: string): string[] {
+  return value.split(/<br\s*\/?\s*>/i);
+}
+
+function answerRevealKey(wordKey: string, lineIndex: number): string {
+  return `${wordKey}\u0000${lineIndex}`;
+}
+
 function formatStudyDate(dateKey: string, locale: string): string {
   const [year, month, day] = dateKey.split("-").map(Number);
   return new Date(year, month - 1, day, 12).toLocaleDateString(locale);
@@ -295,8 +303,8 @@ const LANGUAGES = {
     justNow: "только что",
     minutesAgo: "мин. назад",
     hoursAgo: "ч назад",
-    revealNextHint: "Пробел: открыть следующую строку",
-    revealNext: "Открыть следующую строку",
+    revealNextHint: "Пробел: открыть следующую строку ответа",
+    revealNext: "Открыть следующую строку ответа",
     autoScroll: "Автоматическая прокрутка",
     previousLesson: "Предыдущий урок",
     nextLesson: "Следующий урок",
@@ -379,8 +387,8 @@ const LANGUAGES = {
     justNow: "just now",
     minutesAgo: "min ago",
     hoursAgo: "h ago",
-    revealNextHint: "Space: reveal the next row",
-    revealNext: "Reveal the next row",
+    revealNextHint: "Space: reveal the next answer line",
+    revealNext: "Reveal the next answer line",
     autoScroll: "Automatic scrolling",
     previousLesson: "Previous lesson",
     nextLesson: "Next lesson",
@@ -989,25 +997,35 @@ export default function VocabPage() {
     });
   }, [displayWords]);
 
-  let nextHiddenWord: Word | undefined;
-  if (displayWords.length > 0) {
-    const cursorIndex = displayWords.findIndex(word => wordIdentity(word) === lastAutoRevealedKeyRef.current);
-    for (let step = 1; step <= displayWords.length; step++) {
-      const candidate = displayWords[(cursorIndex + step) % displayWords.length];
-      if (!revealed.has(wordIdentity(candidate))) {
-        nextHiddenWord = candidate;
+  const revealTargets = displayWords.flatMap(word => {
+    const key = wordIdentity(word);
+    const answer = inverted ? word.russian : word.spanish;
+    return answerLines(answer).flatMap((line, lineIndex) => line.trim() ? [{ word, key, lineIndex, token: answerRevealKey(key, lineIndex) }] : []);
+  });
+  let nextRevealTarget: (typeof revealTargets)[number] | undefined;
+  if (revealTargets.length > 0) {
+    const cursorIndex = revealTargets.findIndex(target => target.token === lastAutoRevealedKeyRef.current);
+    for (let step = 1; step <= revealTargets.length; step++) {
+      const candidate = revealTargets[(cursorIndex + step) % revealTargets.length];
+      if (!revealed.has(candidate.token)) {
+        nextRevealTarget = candidate;
         break;
       }
     }
   }
   const revealNext = useCallback(() => {
-    if (!nextHiddenWord) return false;
-    const revealedKey = wordIdentity(nextHiddenWord);
-    lastAutoRevealedKeyRef.current = revealedKey;
-    setRevealed(previous => new Set(previous).add(revealedKey));
-    if (!displayWords.some(word => wordIdentity(word) !== revealedKey && !revealed.has(wordIdentity(word)))) setAllRevealed(true);
+    if (!nextRevealTarget) return false;
+    lastAutoRevealedKeyRef.current = nextRevealTarget.token;
+    const next = new Set(revealed);
+    answerLines(inverted ? nextRevealTarget.word.russian : nextRevealTarget.word.spanish).forEach((line, lineIndex) => {
+      if (lineIndex <= nextRevealTarget.lineIndex && line.trim()) {
+        next.add(answerRevealKey(nextRevealTarget.key, lineIndex));
+      }
+    });
+    setRevealed(next);
+    setAllRevealed(revealTargets.every(target => next.has(target.token)));
     return true;
-  }, [displayWords, nextHiddenWord, revealed]);
+  }, [inverted, nextRevealTarget, revealTargets, revealed]);
 
   const animateScrollTo = (targetY: number, durationMs = 2000, onComplete?: () => void) => {
     if (revealScrollFrameRef.current !== null) cancelAnimationFrame(revealScrollFrameRef.current);
@@ -1042,50 +1060,51 @@ export default function VocabPage() {
   };
 
   const revealNextFromButton = () => {
-    if (!nextHiddenWord) return;
-    const row = document.querySelector<HTMLElement>(`[data-testid="row-word-${nextHiddenWord.id}"]`);
-    const answer = row?.querySelector<HTMLElement>(".answer-reveal");
-    const revealSelectedWord = (scrollForwardAfterReveal: boolean) => {
-      if (!revealNext() || !scrollForwardAfterReveal || !settings.autoScroll || !row || !answer) return;
-
+    if (!nextRevealTarget) return;
+    const { word } = nextRevealTarget;
+    const row = document.querySelector<HTMLElement>(`[data-testid="row-word-${word.id}"]`);
+    const lineIndex = nextRevealTarget.lineIndex;
+    const line = row?.querySelector<HTMLElement>(`[data-reveal-line="${lineIndex}"]`);
+    const revealSelectedLine = (scrollAfterReveal: boolean) => {
+      if (!revealNext() || !scrollAfterReveal || !settings.autoScroll || !row || !line) return;
       let finished = false;
       let fallbackTimer = 0;
       const finish = () => {
         if (finished) return;
         finished = true;
         window.clearTimeout(fallbackTimer);
-        answer.removeEventListener("transitionend", onTransitionEnd);
+        line.removeEventListener("transitionend", onTransitionEnd);
         requestAnimationFrame(() => {
-          if (settingsRef.current.autoScroll && row.getBoundingClientRect().height > 0) {
-            scrollByRevealHeight(row.getBoundingClientRect().height);
-          }
+          if (!settingsRef.current.autoScroll) return;
+          const rect = line.getBoundingClientRect();
+          const delta = rect.bottom > window.innerHeight - 16 ? rect.bottom - window.innerHeight + 16 : 0;
+          if (delta > 0) scrollByRevealHeight(delta);
         });
       };
       const onTransitionEnd = (event: TransitionEvent) => {
-        if (event.target === answer && event.propertyName === "grid-template-rows") finish();
+        if (event.target === line && event.propertyName === "grid-template-rows") finish();
       };
-      answer.addEventListener("transitionend", onTransitionEnd);
+      line.addEventListener("transitionend", onTransitionEnd);
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) requestAnimationFrame(finish);
       else fallbackTimer = window.setTimeout(finish, REVEAL_TRANSITION_MS + 50);
     };
-
-    if (!settings.autoScroll || !row) {
-      revealSelectedWord(false);
+    if (!settings.autoScroll || !row || !line) {
+      revealSelectedLine(false);
       return;
     }
-    const rowRect = row.getBoundingClientRect();
+    const lineRect = line.getBoundingClientRect();
     const viewportTop = 56;
-    if (rowRect.top < viewportTop || rowRect.bottom > window.innerHeight) {
-      const delta = rowRect.top < viewportTop
-        ? rowRect.top - viewportTop
-        : rowRect.bottom - window.innerHeight + 16;
-      animateScrollTo(window.scrollY + delta, 2000, () => revealSelectedWord(false));
+    if (lineRect.top < viewportTop || lineRect.bottom > window.innerHeight) {
+      const delta = lineRect.top < viewportTop
+        ? lineRect.top - viewportTop
+        : lineRect.bottom - window.innerHeight + 16;
+      animateScrollTo(window.scrollY + delta, 2000, () => revealSelectedLine(false));
     } else {
-      revealSelectedWord(true);
+      revealSelectedLine(true);
     }
   };
 
-  const hasHiddenWords = nextHiddenWord !== undefined;
+  const hasHiddenWords = nextRevealTarget !== undefined;
   const handleRevealControlAction = () => {
     if (hasHiddenWords) {
       revealNextFromButton();
@@ -1274,16 +1293,32 @@ export default function VocabPage() {
     setFilterLevel(0);
   };
 
-  const toggleReveal = useCallback((key: string) => {
-    setRevealed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
-  }, []);
+  const toggleReveal = (key: string, lineIndex: number) => {
+    const word = displayWords.find(candidate => wordIdentity(candidate) === key);
+    if (!word) return;
+    const lines = answerLines(inverted ? word.russian : word.spanish);
+    const clickedToken = answerRevealKey(key, lineIndex);
+    const next = new Set(revealed);
+    if (next.has(clickedToken)) {
+      lines.forEach((_, index) => next.delete(answerRevealKey(key, index)));
+    } else {
+      lines.forEach((line, index) => {
+        if (index <= lineIndex && line.trim()) next.add(answerRevealKey(key, index));
+      });
+    }
+    setRevealed(next);
+    setAllRevealed(revealTargets.every(target => next.has(target.token)));
+  };
 
   const toggleAll = () => {
     if (allRevealed) {
       lastAutoRevealedKeyRef.current = null;
       setRevealed(new Set());
-    } else { setRevealed(new Set(displayWords.map(wordIdentity))); }
-    setAllRevealed(a => !a);
+      setAllRevealed(false);
+    } else {
+      setRevealed(new Set(revealTargets.map(target => target.token)));
+      setAllRevealed(true);
+    }
   };
 
   const changeTap = (lineId: string, change: (value: number) => number) => {
@@ -1398,6 +1433,7 @@ export default function VocabPage() {
     }
   };
 
+  const brLineGap = Math.max(1, settings.rowSpacing * 0.5);
   const cell: React.CSSProperties = {
     padding: `${settings.rowSpacing}px 0`,
     verticalAlign: "middle",
@@ -1410,7 +1446,12 @@ export default function VocabPage() {
   const lnk: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: 13, color: p.fg };
   const lbl: React.CSSProperties = { display: "flex", alignItems: "center", gap: "0.75rem", color: p.fg };
 
-  const revealedCount = displayWords.filter(word => revealed.has(wordIdentity(word))).length;
+  const revealedCount = displayWords.filter(word => {
+    const key = wordIdentity(word);
+    return answerLines(inverted ? word.russian : word.spanish).every((line, lineIndex) =>
+      !line.trim() || revealed.has(answerRevealKey(key, lineIndex))
+    );
+  }).length;
   const totalCount = displayWords.length;
   const pct = totalCount > 0 ? Math.round((revealedCount / totalCount) * 100) : 0;
 
@@ -1546,13 +1587,14 @@ export default function VocabPage() {
         @media (prefers-reduced-motion: reduce) { details.zs::details-content, .vocab-settings-panel, .source-blur-transition { transition: none; } }
         .zw { display: flex; }
         .source-blur-transition { transition: filter 160ms ease; }
-        .answer-reveal { position: relative; display: grid; grid-template-rows: 0fr; min-height: 0.6em; transition: grid-template-rows ${REVEAL_TRANSITION_MS}ms ease; }
-        .answer-reveal.is-open { grid-template-rows: 1fr; }
-        .answer-reveal__content { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-2px); transition: opacity 150ms ease, transform ${REVEAL_TRANSITION_MS}ms ease; }
-        .answer-reveal.is-open .answer-reveal__content { opacity: 1; transform: translateY(0); }
+        .answer-reveal { position: relative; }
+        .answer-reveal__line { position: relative; display: grid; grid-template-rows: 0fr; min-height: 0.6em; transition: grid-template-rows ${REVEAL_TRANSITION_MS}ms ease; }
+        .answer-reveal__line.is-open { grid-template-rows: 1fr; }
+        .answer-reveal__content { display: block; min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-2px); transition: opacity 150ms ease, transform ${REVEAL_TRANSITION_MS}ms ease; }
+        .answer-reveal__line.is-open .answer-reveal__content { opacity: 1; transform: translateY(0); }
         .answer-reveal__placeholder { position: absolute; left: 0; top: 50%; width: 4em; height: 0.6em; transform: translateY(-50%); transition: opacity 120ms ease; }
-        .answer-reveal.is-open .answer-reveal__placeholder { opacity: 0; }
-        @media (prefers-reduced-motion: reduce) { .answer-reveal, .answer-reveal__content, .answer-reveal__placeholder { transition: none; } }
+        .answer-reveal__line.is-open .answer-reveal__placeholder { opacity: 0; }
+        @media (prefers-reduced-motion: reduce) { .answer-reveal__line, .answer-reveal__content, .answer-reveal__placeholder { transition: none; } }
         @media (max-width: 600px) { .zw { display: none; } }
       `}</style>
 
@@ -1793,23 +1835,36 @@ export default function VocabPage() {
           <tbody>
             {displayWords.map((word, index) => {
               const count = word.complexity;
-              const isRevealed = revealed.has(wordIdentity(word));
               const previousWord = displayWords[index - 1];
               const startsNewGroup = Boolean(previousWord && previousWord.group !== word.group);
               const borderTop = startsNewGroup ? `1px solid ${p.fgMuted}` : cell.borderTop;
               return (
                 <tr key={word.id} data-testid={`row-word-${word.id}`}>
-                  <td style={{ ...cell, borderTop, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>{inverted ? word.spanish : word.russian}</td>
+                  <td style={{ ...cell, borderTop, paddingRight: "1em", color: p.fg, overflowWrap: "anywhere" }}>
+                    {answerLines(inverted ? word.spanish : word.russian).map((line, lineIndex, lines) => <span key={lineIndex}
+                      style={{ display: "block", minHeight: "1em", marginBottom: lineIndex < lines.length - 1 ? brLineGap : 0 }}>
+                      {line}
+                    </span>)}
+                  </td>
                   <td style={{ ...cell, borderTop, textAlign: "center", padding: 0 }}>
                     <CounterCell rk={word.key ?? String(word.id)} count={count} onInc={inc} onDec={dec} onReset={reset} onResetAll={resetAll} rowPadding={settings.rowSpacing} fontSize={settings.fontSize} p={p} />
                   </td>
-                  <td data-testid={`cell-spanish-${word.id}`} onClick={() => toggleReveal(wordIdentity(word))}
-                    style={{ ...cell, borderTop, paddingLeft: "1em", cursor: "pointer", color: p.fg, overflowWrap: "anywhere" }}>
-                    <div className={`answer-reveal${isRevealed ? " is-open" : ""}`}>
-                      <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />
-                      <span className="answer-reveal__content" aria-hidden={!isRevealed}>
-                        {inverted ? word.russian : word.spanish}
-                      </span>
+                  <td data-testid={`cell-spanish-${word.id}`}
+                    style={{ ...cell, borderTop, paddingLeft: "1em", color: p.fg, overflowWrap: "anywhere" }}>
+                    <div className="answer-reveal" style={{ display: "flex", flexDirection: "column", gap: brLineGap }}>
+                      {answerLines(inverted ? word.russian : word.spanish).map((line, lineIndex) => {
+                        const key = wordIdentity(word);
+                        const lineToken = answerRevealKey(key, lineIndex);
+                        const isLineRevealed = revealed.has(lineToken);
+                        const hasText = Boolean(line.trim());
+                        return <div key={lineIndex} data-reveal-line={lineIndex}
+                          className={`answer-reveal__line${isLineRevealed ? " is-open" : ""}`}
+                          onClick={hasText ? () => toggleReveal(key, lineIndex) : undefined}
+                          style={{ cursor: hasText ? "pointer" : "default" }}>
+                          {hasText && <span className="answer-reveal__placeholder" aria-hidden="true" style={{ background: p.placeholder, borderRadius: 2 }} />}
+                          <span className="answer-reveal__content" aria-hidden={!isLineRevealed}>{line}</span>
+                        </div>;
+                      })}
                     </div>
                   </td>
                 </tr>
