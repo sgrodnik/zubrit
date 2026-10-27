@@ -420,14 +420,14 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function shuffleWithinGroups(words: Word[]): Word[] {
+function shuffleGroupsAndWords(words: Word[]): Word[] {
   const groups = new Map<number, Word[]>();
   for (const word of words) {
     const group = groups.get(word.group) ?? [];
     group.push(word);
     groups.set(word.group, group);
   }
-  return [...groups.values()].flatMap(shuffle);
+  return shuffle([...groups.values()]).flatMap(shuffle);
 }
 
 // ── Theme colours ─────────────────────────────────────────────────────────────
@@ -623,7 +623,7 @@ export default function VocabPage() {
   const randomize = isComplexLesson ? settings.complexRandomize : activeLesson.randomize;
   const randomOrderContext = isComplexLesson ? COMPLEX_LESSON_ID : activeLesson.id;
   const [shuffledWords, setShuffledWords] = useState<Word[]>(() =>
-    randomize ? shuffleWithinGroups(words) : []
+    randomize ? shuffleGroupsAndWords(words) : []
   );
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [allRevealed, setAllRevealed] = useState(false);
@@ -822,7 +822,7 @@ export default function VocabPage() {
 
   const handleRandomize = (val: boolean) => {
     captureShufflePositions();
-    if (val) setShuffledWords(shuffleWithinGroups(words));
+    if (val) setShuffledWords(shuffleGroupsAndWords(words));
     if (isComplexLesson) setSettings(s => ({ ...s, complexRandomize: val }));
     else updateActiveLesson(lesson => ({ ...lesson, randomize: val }), false);
   };
@@ -836,7 +836,7 @@ export default function VocabPage() {
   }, [randomize, shuffledWords, words]);
 
   useEffect(() => {
-    if (randomize) setShuffledWords(shuffleWithinGroups(words));
+    if (randomize) setShuffledWords(shuffleGroupsAndWords(words));
   }, [wordOrderSignature, randomize, randomOrderContext]);
 
   // Filter — not persisted, resets on page reload
@@ -955,7 +955,7 @@ export default function VocabPage() {
     } else {
       if (randomize) {
         captureShufflePositions();
-        setShuffledWords(shuffleWithinGroups(words));
+        setShuffledWords(shuffleGroupsAndWords(words));
       }
       setRevealed(new Set());
       setAllRevealed(false);
