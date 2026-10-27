@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import changelogMarkdown from "../../../../CHANGELOG.md?raw";
 import type { Lesson, LessonState, Word } from "../features/lessons/types";
 import { isInverted, normalizeStudySeconds, parseWords, setInverted, setLineComplexity, withoutLessonFlags } from "../features/lessons/model";
@@ -607,6 +607,7 @@ export default function VocabPage() {
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceRevealed, setSourceRevealed] = useState(false);
+  const shufflePositionsRef = useRef<Map<string, number> | null>(null);
   const [copyLesson, setCopyLesson] = useState(false);
   const [newLessonName, setNewLessonName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -845,6 +846,26 @@ export default function VocabPage() {
     [orderedWords, activeFilterLevel]
   );
 
+  useLayoutEffect(() => {
+    const previousPositions = shufflePositionsRef.current;
+    if (!previousPositions) return;
+    shufflePositionsRef.current = null;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    document.querySelectorAll<HTMLTableRowElement>('tr[data-testid^="row-word-"]').forEach(row => {
+      const id = row.getAttribute("data-testid");
+      const previousTop = id ? previousPositions.get(id) : undefined;
+      if (previousTop === undefined) return;
+      const offset = previousTop - row.getBoundingClientRect().top;
+      if (Math.abs(offset) < 1) return;
+      row.getAnimations().forEach(animation => animation.cancel());
+      row.animate(
+        [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0)" }],
+        { duration: 360, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" },
+      );
+    });
+  }, [displayWords]);
+
   const nextHiddenWord = displayWords.find(word => !revealed.has(wordIdentity(word)));
   const revealNext = useCallback(() => {
     if (!nextHiddenWord) return false;
@@ -916,7 +937,17 @@ export default function VocabPage() {
     } else if (settings.autoScroll && scrollYRef.current > 1) {
       animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
     } else {
-      if (randomize) setShuffledWords(shuffleWithinGroups(words));
+      if (randomize) {
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          const positions = new Map<string, number>();
+          document.querySelectorAll<HTMLTableRowElement>('tr[data-testid^="row-word-"]').forEach(row => {
+            const id = row.getAttribute("data-testid");
+            if (id) positions.set(id, row.getBoundingClientRect().top);
+          });
+          shufflePositionsRef.current = positions;
+        }
+        setShuffledWords(shuffleWithinGroups(words));
+      }
       setRevealed(new Set());
       setAllRevealed(false);
     }
