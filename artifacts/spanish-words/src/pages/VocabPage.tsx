@@ -144,7 +144,7 @@ function ActivityHistogram({ studySecondsByDate, today, label, minutesShort, col
   });
   const maxSeconds = Math.max(0, ...secondsByDay);
   return (
-    <span ref={containerRef} role="img" aria-label={label} style={{ display: "flex", alignItems: "end", gap: 2, height: 24, width: "100%", marginTop: 7, overflow: "hidden" }}>
+    <span ref={containerRef} role="img" aria-label={label} style={{ display: "flex", alignItems: "end", gap: 2, height: 24, width: "100%", marginTop: 2, overflow: "hidden" }}>
       {secondsByDay.map((seconds, index) => {
         const date = new Date(`${days[index]}T12:00:00`);
         const weekday = date.getDay();
@@ -1336,7 +1336,7 @@ export default function VocabPage() {
                 }} aria-label={`${lesson.name}. ${t.size} ${lessonWords.length} (${complexCount})`}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 0", color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
                   <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
-                    <span>{sortedLessons.length - index}. {lesson.name}</span>
+                    <span style={{ minWidth: 0, flex: "1 1 auto", lineHeight: 1.2, marginBottom: "-1.2em", position: "relative", zIndex: 1, overflowWrap: "anywhere" }}>{sortedLessons.length - index}. {lesson.name}</span>
                     <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
                       {t.size} {lessonWords.length} ({complexCount}) · {t.total} {totalMinutes} {t.minutesShort}
                       {recency && <> · {recency} {lastDayMinutes} {t.minutesShort}</>}
