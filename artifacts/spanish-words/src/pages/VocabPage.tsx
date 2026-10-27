@@ -805,7 +805,21 @@ export default function VocabPage() {
 
   const wordOrderSignature = JSON.stringify(words.map(word => [word.key ?? word.id, word.russian, word.spanish, word.group]));
 
+  const captureShufflePositions = () => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      shufflePositionsRef.current = null;
+      return;
+    }
+    const positions = new Map<string, number>();
+    document.querySelectorAll<HTMLTableRowElement>('tr[data-testid^="row-word-"]').forEach(row => {
+      const id = row.getAttribute("data-testid");
+      if (id) positions.set(id, row.getBoundingClientRect().top);
+    });
+    shufflePositionsRef.current = positions;
+  };
+
   const handleRandomize = (val: boolean) => {
+    captureShufflePositions();
     if (val) setShuffledWords(shuffleWithinGroups(words));
     if (isComplexLesson) setSettings(s => ({ ...s, complexRandomize: val }));
     else updateActiveLesson(lesson => ({ ...lesson, randomize: val }), false);
@@ -938,14 +952,7 @@ export default function VocabPage() {
       animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
     } else {
       if (randomize) {
-        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-          const positions = new Map<string, number>();
-          document.querySelectorAll<HTMLTableRowElement>('tr[data-testid^="row-word-"]').forEach(row => {
-            const id = row.getAttribute("data-testid");
-            if (id) positions.set(id, row.getBoundingClientRect().top);
-          });
-          shufflePositionsRef.current = positions;
-        }
+        captureShufflePositions();
         setShuffledWords(shuffleWithinGroups(words));
       }
       setRevealed(new Set());
