@@ -266,6 +266,7 @@ const LANGUAGES = {
     minutesShort: "мин",
     save: "Сохранить",
     close: "Закрыть",
+    ok: "ОК",
     today: "сегодня",
     yesterday: "вчера",
     daysAgo: "дн. назад",
@@ -344,6 +345,7 @@ const LANGUAGES = {
     minutesShort: "min",
     save: "Save",
     close: "Close",
+    ok: "OK",
     today: "today",
     yesterday: "yesterday",
     daysAgo: "d ago",
@@ -1099,6 +1101,12 @@ export default function VocabPage() {
       }));
     }
     setNewLessonName(name);
+    setLessonDetailsOpen(false);
+  };
+
+  const cancelLessonName = () => {
+    setNewLessonName(activeLesson.name);
+    setLessonDetailsOpen(false);
   };
 
   const deleteCurrentLesson = () => {
@@ -1426,7 +1434,7 @@ export default function VocabPage() {
           </div>}
         </div>
 
-        {lessonDetailsOpen && <div role="dialog" aria-modal="true" aria-label={t.lessonDetails} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
+        {lessonDetailsOpen && <div role="dialog" aria-modal="true" aria-label={t.lessonDetails} onClick={event => { if (event.target === event.currentTarget) cancelLessonName(); }} style={{ position: "fixed", inset: 0, zIndex: 100, background: "#0008", display: "grid", placeItems: "center", padding: 16 }}>
           <form onSubmit={event => { event.preventDefault(); saveLessonName(); }} style={{ width: "min(480px, 100%)", maxHeight: "85vh", overflowY: "auto", padding: 20, background: p.settingsBg, border: `1px solid ${p.menuBorder}`, color: p.fg, display: "flex", flexDirection: "column", gap: 14 }}>
             <strong>{t.lessonDetails}</strong>
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1458,8 +1466,8 @@ export default function VocabPage() {
               <button type="button" disabled={lessonState.lessons.length <= 1} onClick={deleteCurrentLesson}
                 style={{ ...lnk, color: "#c0392b", opacity: lessonState.lessons.length <= 1 ? 0.4 : 1 }}>{t.deleteLesson}</button>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
-                <button type="button" onClick={() => setLessonDetailsOpen(false)} style={lnk}>{t.close}</button>
-                <button type="submit" style={lnk}>{t.save}</button>
+                <button type="button" onClick={cancelLessonName} style={lnk}>{t.cancel}</button>
+                <button type="submit" style={lnk}>{t.ok}</button>
               </div>
             </div>
           </form>
