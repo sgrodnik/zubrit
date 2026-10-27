@@ -2,7 +2,7 @@
 
 Versions are assigned to grouped milestones; small fixes and follow-up tweaks are included with the related entry. Entries are ordered newest first.
 
-- **v0.11** · **2026-10-26** — Switching lessons blurs the word list and collapses settings; creating a lesson opens settings with the list unblurred. Changing the random-order setting and restarting with it enabled smoothly reshuffles groups and the words within each group, keeping groups intact. The floating reveal button continues after the last word it opened, wraps around to skipped words, and scrolls to off-screen words before revealing them.
+- **v0.11** · **2026-10-26** — Switching lessons blurs the word list and collapses settings; creating a lesson opens settings with the list unblurred. Changing the random-order setting and restarting with it enabled smoothly reshuffles groups and the words within each group, keeping groups intact. The floating reveal button continues after the last word it opened, wraps around to skipped words, and scrolls to off-screen words before revealing them. Lesson pages include vertically stacked previous/next lesson cards with dashboard details.
 - **v0.10** · **2026-10-24** — Improved lesson statistics, added sorting for complex words, and introduced a compact home-screen changelog. Random order is preserved when difficulty changes and stored per lesson; lesson copying is off by default and retains the user's choice.
 - **v0.8** · **2026-10-23** — Added lesson creation dates to the activity chart.
 - **v0.7** · **2026-10-22** — Added a lesson dashboard with activity charts, lesson statistics, and browser navigation. Added a virtual lesson for difficult words.

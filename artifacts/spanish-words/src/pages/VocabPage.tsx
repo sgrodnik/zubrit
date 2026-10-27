@@ -274,6 +274,8 @@ const LANGUAGES = {
     revealNextHint: "Пробел: открыть следующую строку",
     revealNext: "Открыть следующую строку",
     autoScroll: "Автоматическая прокрутка",
+    previousLesson: "Предыдущий урок",
+    nextLesson: "Следующий урок",
     showRevealButton: "Показывать плавающую кнопку",
     revealButtonSize: "Размер кнопки (px)",
     scrollToTop: "Прокрутить наверх",
@@ -353,6 +355,8 @@ const LANGUAGES = {
     revealNextHint: "Space: reveal the next row",
     revealNext: "Reveal the next row",
     autoScroll: "Automatic scrolling",
+    previousLesson: "Previous lesson",
+    nextLesson: "Next lesson",
     showRevealButton: "Show floating button",
     revealButtonSize: "Button size (px)",
     scrollToTop: "Scroll to top",
@@ -500,6 +504,34 @@ function NumberedTextarea({ value, onChange, onBlur, onReveal, sourceRevealed, p
         style={{ flex: 1, padding: "4px 6px", fontSize: 12, fontFamily: "monospace", lineHeight: "1.5", border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: p.bg, color: p.fg, height: maxHeight ?? "auto", overflowY: "auto", filter: sourceRevealed ? undefined : "blur(5px)" }}
       />
     </div>
+  );
+}
+
+function LessonCard({ lesson, rank, today, t, p, onClick, padding = "10px 0" }: {
+  lesson: Lesson; rank: number; today: string; t: typeof LANGUAGES.ru; p: Palette; onClick: () => void; padding?: string;
+}) {
+  const lessonWords = parseWords(lesson.wordsText);
+  const complexCount = lessonWords.filter(word => word.complexity > 0).length;
+  const studyEntries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
+  const totalMinutes = Math.round(studyEntries.reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
+  const lastDate = studyEntries.map(([date]) => date).sort().at(-1);
+  const lastDayMinutes = lastDate ? Math.round((lesson.studySecondsByDate?.[lastDate] ?? 0) / 60) : 0;
+  const recency = lastDate
+    ? (() => { const days = daysBetweenDateKeys(lastDate, today); return days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`; })()
+    : "";
+
+  return (
+    <button type="button" onClick={onClick} aria-label={`${lesson.name}. ${t.size} ${lessonWords.length} (${complexCount})`}
+      style={{ display: "block", width: "100%", textAlign: "left", padding, color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
+      <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
+        <span style={{ minWidth: 0, flex: "1 1 auto", lineHeight: 1.2, marginBottom: "-1.2em", position: "relative", zIndex: 1, overflowWrap: "anywhere" }}>{rank}. {lesson.name}</span>
+        <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+          {t.size} {lessonWords.length} ({complexCount}) · {t.total} {totalMinutes} {t.minutesShort}
+          {recency && <> · {recency} {lastDayMinutes} {t.minutesShort}</>}
+        </span>
+      </span>
+      <ActivityHistogram studySecondsByDate={lesson.studySecondsByDate ?? {}} today={today} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
+    </button>
   );
 }
 
@@ -1313,6 +1345,7 @@ export default function VocabPage() {
   }, [lessonState.lessons, complexStudySecondsByDate]);
   const lessonCreatedOnDates = useMemo(() => new Set(lessonState.lessons.map(lesson => studyDateKey(lesson.createdAt))), [lessonState.lessons]);
   const sortedLessons = [...lessonState.lessons].sort((a, b) => b.createdAt - a.createdAt);
+  const currentLessonIndex = sortedLessons.findIndex(lesson => lesson.id === activeLesson.id);
   const buttonOffersTop = settings.autoScroll && !isAtTop;
   const revealButtonLabel = hasHiddenWords ? t.revealNext : buttonOffersTop ? t.scrollToTop : t.restartReveals;
   const revealButtonIcon = hasHiddenWords ? "↓" : buttonOffersTop ? "↑" : "↻";
@@ -1362,34 +1395,7 @@ export default function VocabPage() {
               </span>
               <ActivityHistogram studySecondsByDate={complexStudySecondsByDate} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
             </button>}
-            {sortedLessons.map((lesson, index) => {
-              const lessonWords = parseWords(lesson.wordsText);
-              const complexCount = lessonWords.filter(word => word.complexity > 0).length;
-              const studyEntries = Object.entries(lesson.studySecondsByDate ?? {}).filter(([, seconds]) => seconds > MIN_VISIBLE_STUDY_SECONDS);
-              const totalMinutes = Math.round(studyEntries.reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
-              const lastDate = studyEntries.map(([date]) => date).sort().at(-1);
-              const lastDayMinutes = lastDate ? Math.round((lesson.studySecondsByDate?.[lastDate] ?? 0) / 60) : 0;
-              let recency = "";
-              if (lastDate) {
-                const days = daysBetweenDateKeys(lastDate, todayStudyDate);
-                recency = days === 0 ? t.today : days === 1 ? t.yesterday : `${days} ${t.daysAgo}`;
-              }
-              return (
-                <button key={lesson.id} type="button" onClick={() => {
-                  openLesson(lesson.id);
-                }} aria-label={`${lesson.name}. ${t.size} ${lessonWords.length} (${complexCount})`}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 0", color: p.fg, background: "none", border: "none", cursor: "pointer" }}>
-                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 14 }}>
-                    <span style={{ minWidth: 0, flex: "1 1 auto", lineHeight: 1.2, marginBottom: "-1.2em", position: "relative", zIndex: 1, overflowWrap: "anywhere" }}>{sortedLessons.length - index}. {lesson.name}</span>
-                    <span style={{ color: p.fgMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                      {t.size} {lessonWords.length} ({complexCount}) · {t.total} {totalMinutes} {t.minutesShort}
-                      {recency && <> · {recency} {lastDayMinutes} {t.minutesShort}</>}
-                    </span>
-                  </span>
-                  <ActivityHistogram studySecondsByDate={lesson.studySecondsByDate ?? {}} today={todayStudyDate} label={t.activity} minutesShort={t.minutesShort} color={p.fgMuted} mutedColor={p.fgVeryMuted} />
-                </button>
-              );
-            })}
+            {sortedLessons.map((lesson, index) => <LessonCard key={lesson.id} lesson={lesson} rank={sortedLessons.length - index} today={todayStudyDate} t={t} p={p} onClick={() => openLesson(lesson.id)} />)}
           </div>
         </main>
         {CHANGELOG_ENTRIES.length > 0 && <div className="changelog-bar" aria-hidden={!isAtTop} style={{ position: "fixed", zIndex: 50, right: 0, bottom: 0, left: 0, paddingBottom: "env(safe-area-inset-bottom)", background: p.bg, borderTop: `1px solid ${p.fgVeryMuted}`, opacity: isAtTop ? 1 : 0, transform: isAtTop ? "translateY(0)" : "translateY(100%)", pointerEvents: isAtTop ? "auto" : "none" }}>
@@ -1724,6 +1730,22 @@ export default function VocabPage() {
             })}
           </tbody>
         </table>
+        {!isComplexLesson && currentLessonIndex >= 0 && sortedLessons.length > 1 && <nav aria-label={`${t.previousLesson} / ${t.nextLesson}`} style={{ display: "flex", flexDirection: "column", gap: 32, marginTop: 40 }}>
+          {currentLessonIndex > 0 && <section>
+            <div style={{ color: p.fgMuted, fontSize: 12 }}>{t.previousLesson}</div>
+            <LessonCard key={sortedLessons[currentLessonIndex - 1].id} lesson={sortedLessons[currentLessonIndex - 1]} rank={sortedLessons.length - currentLessonIndex + 1} today={todayStudyDate} t={t} p={p} padding="0 0 16px" onClick={() => {
+              openLesson(sortedLessons[currentLessonIndex - 1].id);
+              animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
+            }} />
+          </section>}
+          {currentLessonIndex < sortedLessons.length - 1 && <section>
+            <div style={{ color: p.fgMuted, fontSize: 12 }}>{t.nextLesson}</div>
+            <LessonCard key={sortedLessons[currentLessonIndex + 1].id} lesson={sortedLessons[currentLessonIndex + 1]} rank={sortedLessons.length - currentLessonIndex - 1} today={todayStudyDate} t={t} p={p} padding="0 0 16px" onClick={() => {
+              openLesson(sortedLessons[currentLessonIndex + 1].id);
+              animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
+            }} />
+          </section>}
+        </nav>}
       </div>
       {settings.showRevealButton && displayWords.length > 0 && !createLessonOpen && !lessonDetailsOpen && <button
         type="button"
