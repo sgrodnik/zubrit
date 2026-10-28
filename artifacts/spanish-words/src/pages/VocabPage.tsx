@@ -69,6 +69,16 @@ function answerRevealKey(wordKey: string, lineIndex: number): string {
   return `${wordKey}\u0000${lineIndex}`;
 }
 
+function formatTimerDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  if (minutes > 0) return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  return String(remainingSeconds);
+}
+
 function formatStudyDate(dateKey: string, locale: string): string {
   const [year, month, day] = dateKey.split("-").map(Number);
   return new Date(year, month - 1, day, 12).toLocaleDateString(locale);
@@ -291,6 +301,7 @@ const LANGUAGES = {
     updated: "Изменён",
     date: "Дата",
     duration: "Длительность",
+    sinceReveal: "С последнего раскрытия",
     noStudyTime: "Пока нет учтённого времени",
     minutesShort: "мин",
     save: "Сохранить",
@@ -375,6 +386,7 @@ const LANGUAGES = {
     updated: "Edited",
     date: "Date",
     duration: "Duration",
+    sinceReveal: "Since last reveal",
     noStudyTime: "No study time recorded yet",
     minutesShort: "min",
     save: "Save",
@@ -681,6 +693,8 @@ export default function VocabPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceRevealed, setSourceRevealed] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [timerNow, setTimerNow] = useState(() => Date.now());
+  const [lastRevealAt, setLastRevealAt] = useState<number | null>(null);
   const shufflePositionsRef = useRef<Map<string, number> | null>(null);
   const lastAutoRevealedKeyRef = useRef<string | null>(null);
   const [copyLesson, setCopyLesson] = useState(false);
@@ -782,6 +796,10 @@ export default function VocabPage() {
 
   useEffect(() => {
     const interval = window.setInterval(() => setClockNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+  useEffect(() => {
+    const interval = window.setInterval(() => setTimerNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
   useEffect(() => { setRevealButtonSizeDraft(String(settings.revealButtonSize)); }, [settings.revealButtonSize]);
@@ -1024,6 +1042,7 @@ export default function VocabPage() {
     });
     setRevealed(next);
     setAllRevealed(revealTargets.every(target => next.has(target.token)));
+    setLastRevealAt(Date.now());
     return true;
   }, [inverted, nextRevealTarget, revealTargets, revealed]);
 
@@ -1306,6 +1325,7 @@ export default function VocabPage() {
       lines.forEach((line, index) => {
         if (index <= lineIndex && line.trim()) next.add(answerRevealKey(key, index));
       });
+      setLastRevealAt(Date.now());
     }
     setRevealed(next);
     setAllRevealed(revealTargets.every(target => next.has(target.token)));
@@ -1317,6 +1337,7 @@ export default function VocabPage() {
       setRevealed(new Set());
       setAllRevealed(false);
     } else {
+      if (revealTargets.some(target => !revealed.has(target.token))) setLastRevealAt(Date.now());
       setRevealed(new Set(revealTargets.map(target => target.token)));
       setAllRevealed(true);
     }
@@ -1455,6 +1476,9 @@ export default function VocabPage() {
   }).length;
   const totalCount = displayWords.length;
   const pct = totalCount > 0 ? Math.round((revealedCount / totalCount) * 100) : 0;
+  const lessonStudySeconds = Object.values(isComplexLesson ? complexStudySecondsByDate : activeLesson.studySecondsByDate ?? {})
+    .reduce((total, seconds) => total + seconds, 0);
+  const sinceRevealSeconds = lastRevealAt === null ? null : Math.floor(Math.max(0, timerNow - lastRevealAt) / 1000);
 
   const languagePair = wordsText.match(/^\s*#lang\s+(\S+)\s+(.+?)\s*$/m);
   const firstLanguage = languagePair?.[1] ?? t.russian;
@@ -1669,16 +1693,23 @@ export default function VocabPage() {
         </div>}
 
         {/* Sticky settings / progress header */}
-        <div style={{ position: "sticky", top: 0, zIndex: 20, display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 12, padding: "8px 0", marginBottom: settingsOpen ? "0.5rem" : "1.25rem", background: p.bg, borderBottom: `1px solid ${p.divider}` }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 20, display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", alignItems: "center", gap: 8, padding: "8px 0", marginBottom: settingsOpen ? "0.5rem" : "1.25rem", background: p.bg, borderBottom: `1px solid ${p.divider}` }}>
           <button type="button" aria-expanded={settingsOpen} aria-controls="vocab-settings-panel" onClick={() => {
             if (!settingsOpen && window.scrollY > 1) animateScrollTo(0, SCROLL_TO_TOP_DURATION_MS);
             setSettingsOpen(open => !open);
           }}
             style={{ background: "none", border: "none", padding: 0, justifySelf: "start", cursor: "pointer", color: p.fgMuted, fontSize: 13, textAlign: "left" }}>{t.settings}</button>
-          <div role="status" aria-live="polite" aria-label={`${revealedCount}/${totalCount} · ${pct}%`}
-            style={{ display: "flex", gap: 16, justifyContent: "center", color: p.fg, fontSize: 13 }}>
-            <span data-testid="vocab-progress-count">{revealedCount}/{totalCount}</span>
-            <span data-testid="vocab-progress-percent">{pct}%</span>
+          <div style={{ display: "contents", color: p.fg, fontSize: 12, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+            <span role="timer" aria-live="off" data-testid="vocab-lesson-duration" title={t.duration} aria-label={`${t.duration}: ${formatTimerDuration(lessonStudySeconds)}`} style={{ justifySelf: "center" }}>
+              {formatTimerDuration(lessonStudySeconds)}
+            </span>
+            <div role="status" aria-live="polite" aria-label={`${revealedCount}/${totalCount} · ${pct}%`} style={{ display: "flex", gap: 10, justifySelf: "center" }}>
+              <span data-testid="vocab-progress-count">{revealedCount}/{totalCount}</span>
+              <span data-testid="vocab-progress-percent">{pct}%</span>
+            </div>
+            <span role="timer" aria-live="off" data-testid="vocab-since-reveal" title={t.sinceReveal} aria-label={`${t.sinceReveal}: ${sinceRevealSeconds === null ? "—" : formatTimerDuration(sinceRevealSeconds)}`} style={{ justifySelf: "center" }}>
+              {sinceRevealSeconds === null ? "—" : formatTimerDuration(sinceRevealSeconds)}
+            </span>
           </div>
           <button type="button" data-testid="button-toggle-all" title={t.revealNextHint} onClick={toggleAll}
             style={{ ...lnk, justifySelf: "end", textDecoration: "none", color: p.fgMuted, fontSize: 13 }}>
