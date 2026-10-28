@@ -1077,7 +1077,8 @@ export default function VocabPage() {
         requestAnimationFrame(() => {
           if (!settingsRef.current.autoScroll) return;
           const rect = line.getBoundingClientRect();
-          const delta = rect.bottom > window.innerHeight - 16 ? rect.bottom - window.innerHeight + 16 : 0;
+          const overflow = rect.bottom > window.innerHeight - 16 ? rect.bottom - window.innerHeight + 16 : 0;
+          const delta = Math.max(rect.height, overflow);
           if (delta > 0) scrollByRevealHeight(delta);
         });
       };
