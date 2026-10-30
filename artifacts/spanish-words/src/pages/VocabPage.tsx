@@ -1097,7 +1097,7 @@ export default function VocabPage() {
           if (!settingsRef.current.autoScroll) return;
           const rect = line.getBoundingClientRect();
           const overflow = rect.bottom > window.innerHeight - 16 ? rect.bottom - window.innerHeight + 16 : 0;
-          const delta = Math.max(rect.height, overflow);
+          const delta = Math.max(row.getBoundingClientRect().height, overflow);
           if (delta > 0) scrollByRevealHeight(delta);
         });
       };
